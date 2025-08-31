@@ -4,6 +4,7 @@
 typedef struct term_t {
     int r, c;
     int cur_x, cur_y;
+    int just_wraped;
     char **screen;
 }term_t ;
 
