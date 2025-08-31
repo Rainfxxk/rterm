@@ -1,3 +1,4 @@
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "term.h"
@@ -17,6 +18,16 @@ term_t *get_term(int r, int c) {
     }
 
     return term;
+}
+
+void screen_up(term_t *term, int n) {
+    char *screen_temp[term->r];
+    for (int i = 0; i < term->r; i++) screen_temp[i] = term->screen[i];
+    for (int i = 0; i < term->r - n; i++ ) term->screen[i] = screen_temp[i + n];
+    for (int i = term->r - n; i < term->r; i++) {
+        term->screen[i] = screen_temp[term->r - n - i];
+        memset(term->screen[i], '\0', term->c);
+    }
 }
 
 int term_write(term_t *term, const char *str) {
@@ -41,6 +52,11 @@ int term_write(term_t *term, const char *str) {
         else if (!just_wraped) {
             term->cur_y++;
             just_wraped = 0;
+        }
+
+        if (term->cur_y >= term->r) {
+            screen_up(term, term->cur_y - term->r + 1);
+            term->cur_y = term->r - 1;
         }
     }
 

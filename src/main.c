@@ -1,5 +1,6 @@
 #include <bits/types/struct_timeval.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
 #include <unistd.h>
@@ -29,8 +30,6 @@
 #define TERM_FOREGROUND 0xadbac7ff
 
 
-int font_w, font_h;
-int cur_x, cur_y;
 char buffer[BUFFER_SIZE + 1];
 
 typedef struct Font {
@@ -64,6 +63,38 @@ void draw_cursor(SDL_Renderer *renderer, SDL_Rect *rect, unsigned rgba) {
     SDL_RenderFillRect(renderer, rect);
 }
 
+void draw_term(SDL_Renderer *renderer, term_t *term, Font *font) {
+    SDL_Color term_fg = {RGBA(TERM_FOREGROUND)};
+    SDL_Color term_bg = {RGBA(TERM_BACKGROUND)};
+
+    SDL_SetRenderDrawColor(renderer, term_bg.r, term_bg.g, term_bg.b, term_bg.a);
+    SDL_RenderClear(renderer);
+
+    SDL_Rect cursor_rect = {.x = term->cur_x * font->w, .y = term->cur_y * font->h, .w = font->w, .h = font->h};
+    draw_cursor(renderer, &cursor_rect, TERM_BACKGROUND);
+    for (int i = 0; i < term->r; i++) {
+        int len = strlen(term->screen[i]);
+        if (len == 0) {
+            continue;
+        }
+        SDL_Rect text_rect = {.x = 0, .y = i * font->h, .w = font->w * len, .h = font->h};
+        SDL_Surface *text = (SDL_Surface *)CHECK_PTR(
+            TTF_RenderText_Blended(font->ttf, term->screen[i], term_fg),
+            "Failed to render text: %s: %d",
+            SDL_GetError(), len 
+        );
+        SDL_Texture *texture = (SDL_Texture *)CHECK_PTR(SDL_CreateTextureFromSurface(renderer, text),
+            "Failed to create texture from surface: %s",
+            SDL_GetError()
+        );
+        SDL_RenderCopy(renderer, texture, NULL, &text_rect);
+    }
+    cursor_rect.x = term->cur_x * font->w;
+    cursor_rect.y = term->cur_y * font->h;
+    draw_cursor(renderer, &cursor_rect, TERM_FOREGROUND);
+    SDL_RenderPresent(renderer);
+}
+
 void init() {
     CHECK(
               SDL_Init(SDL_INIT_EVERYTHING),
@@ -90,11 +121,12 @@ int main() {
         SDL_GetError()
     );
 
+    term_t *term = get_term(TERM_ROW, TERM_COL); 
     SDL_Color term_fg = {RGBA(TERM_FOREGROUND)};
     SDL_Color term_bg = {RGBA(TERM_BACKGROUND)};
     SDL_SetRenderDrawColor(renderer, term_bg.r, term_bg.g, term_bg.b, term_bg.a);
     SDL_RenderClear(renderer);
-    SDL_Rect rect = {.x = cur_x * font.w, .y = cur_y * font.h, .w = font.w, .h = font.h};
+    SDL_Rect rect = {.x = term->cur_x * font.w, .y = term->cur_y * font.h, .w = font.w, .h = font.h};
     draw_cursor(renderer, &rect, TERM_FOREGROUND);
     SDL_RenderPresent(renderer);
 
@@ -105,7 +137,6 @@ int main() {
     term_set_size(pty, TERM_ROW, TERM_COL);
     spawn(pty);
 
-    term_t *term = get_term(TERM_ROW, TERM_COL); 
 
     int maxfd;
     fd_set readable;
@@ -131,35 +162,8 @@ int main() {
             }
             buffer[len] = '\0';
 
-            int cur_x = term->cur_x, cur_y = term->cur_y;
-            int line = term_write(term, buffer);
-            SDL_Rect rect = {.x = cur_x * font.w, .y = cur_y * font.h, .w = font.w, .h = font.h};
-            draw_cursor(renderer, &rect, TERM_BACKGROUND);
-            for (int i = 0; i < line; i++) {
-                int len = strlen(&term->screen[cur_y][cur_x]);
-                if (len == 0) {
-                    cur_x = 0;
-                    cur_y++;
-                    continue;
-                }
-                SDL_Rect text_rect = {.x = cur_x * font.w, .y = cur_y * font.h, .w = font.w * len, .h = font.h};
-                SDL_Surface *text = (SDL_Surface *)CHECK_PTR(
-                    TTF_RenderText_Blended(font.ttf, &term->screen[cur_y][cur_x], term_fg),
-                    "Failed to render text: %s: %d",
-                    SDL_GetError(), len 
-                );
-                SDL_Texture *texture = (SDL_Texture *)CHECK_PTR(SDL_CreateTextureFromSurface(renderer, text),
-                    "Failed to create texture from surface: %s",
-                    SDL_GetError()
-                );
-                SDL_RenderCopy(renderer, texture, NULL, &text_rect);
-                cur_x = 0;
-                cur_y++;
-            }
-            rect.x = term->cur_x * font.w;
-            rect.y = term->cur_y * font.h;
-            draw_cursor(renderer, &rect, TERM_FOREGROUND);
-            SDL_RenderPresent(renderer);
+            term_write(term, buffer);
+            draw_term(renderer, term, &font);
         }
 
         if(SDL_PollEvent(&event)) {
