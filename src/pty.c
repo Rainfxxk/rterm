@@ -9,6 +9,7 @@
 #include <termios.h>
 #include <unistd.h>
 #include "pty.h"
+#include "util.h"
 
 #define SHELL "/bin/bash"
 
@@ -19,21 +20,6 @@ int term_set_size(PTY *pty, int r, int c) {
         .ws_row = r,
     };
 
-    /* This is the very same ioctl that normal programs use to query the
-     * window size. Normal programs are actually able to do this, too,
-     * but it makes little sense: Setting the size has no effect on the
-     * PTY driver in the kernel (it just keeps a record of it) or the
-     * terminal emulator. IIUC, all that's happening is that subsequent
-     * ioctls will report the new size -- until another ioctl sets a new
-     * size.
-     *
-     * I didn't see any response to ioctls of normal programs in any of
-     * the popular terminals (XTerm, VTE, st). They are not informed by
-     * the kernel when a normal program issues an ioctl like that.
-     *
-     * On the other hand, if we were to issue this ioctl during runtime
-     * and the size actually changed, child programs would get a
-     * SIGWINCH. */
     if (ioctl(pty->master, TIOCSWINSZ, &ws) == -1)
     {
         perror("ioctl(TIOCSWINSZ)");
@@ -47,12 +33,6 @@ PTY *open_pty(){
     PTY *pty = (PTY *)malloc(sizeof(PTY));
     char *slave_name;
 
-    /* Opens the PTY master device. This is the file descriptor that
-     * we're reading from and writing to in our terminal emulator.
-     *
-     * We're going for BSD-style management of the controlling terminal:
-     * Don't try to change anything now (O_NOCTTY), we'll issue an
-     * ioctl() later on. */
     pty->master = posix_openpt(O_RDWR | O_NOCTTY);
     if (pty->master == -1)
     {
@@ -60,9 +40,6 @@ PTY *open_pty(){
         exit(1);
     }
 
-    /* grantpt() and unlockpt() are housekeeping functions that have to
-     * be called before we can open the slave FD. Refer to the manpages
-     * on what they do. */
     if (grantpt(pty->master) == -1)
     {
         perror("grantpt");
@@ -108,9 +85,6 @@ int spawn(PTY *pty) {
     {
         close(pty->master);
 
-        /* Create a new session and make our terminal this process'
-         * controlling terminal. The shell that we'll spawn in a second
-         * will inherit the status of session leader. */
         setsid();
         if (ioctl(pty->slave, TIOCSCTTY, NULL) == -1)
         {
