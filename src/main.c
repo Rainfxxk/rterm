@@ -70,8 +70,6 @@ void draw_term(SDL_Renderer *renderer, term_t *term, Font *font) {
     SDL_SetRenderDrawColor(renderer, term_bg.r, term_bg.g, term_bg.b, term_bg.a);
     SDL_RenderClear(renderer);
 
-    SDL_Rect cursor_rect = {.x = term->cur_x * font->w, .y = term->cur_y * font->h, .w = font->w, .h = font->h};
-    draw_cursor(renderer, &cursor_rect, TERM_BACKGROUND);
     for (int i = 0; i < term->r; i++) {
         int len = strlen(term->screen[i]);
         if (len == 0) {
@@ -80,8 +78,8 @@ void draw_term(SDL_Renderer *renderer, term_t *term, Font *font) {
         SDL_Rect text_rect = {.x = 0, .y = i * font->h, .w = font->w * len, .h = font->h};
         SDL_Surface *text = (SDL_Surface *)CHECK_PTR(
             TTF_RenderText_Blended(font->ttf, term->screen[i], term_fg),
-            "Failed to render text: %s: %d",
-            SDL_GetError(), len 
+            "Failed to render text: %s",
+            SDL_GetError()
         );
         SDL_Texture *texture = (SDL_Texture *)CHECK_PTR(SDL_CreateTextureFromSurface(renderer, text),
             "Failed to create texture from surface: %s",
@@ -89,9 +87,21 @@ void draw_term(SDL_Renderer *renderer, term_t *term, Font *font) {
         );
         SDL_RenderCopy(renderer, texture, NULL, &text_rect);
     }
-    cursor_rect.x = term->cur_x * font->w;
-    cursor_rect.y = term->cur_y * font->h;
+    SDL_Rect cursor_rect = {.x = term->cur_x * font->w, .y = term->cur_y * font->h, .w = font->w, .h = font->h};
     draw_cursor(renderer, &cursor_rect, TERM_FOREGROUND);
+    if (term->screen[term->cur_y][term->cur_x] != '\0') {
+        char ch[2] = {term->screen[term->cur_y][term->cur_x], '\0'};
+        SDL_Surface *text = (SDL_Surface *)CHECK_PTR(
+            TTF_RenderText_Blended(font->ttf, ch, term_bg),
+            "Failed to render text: %s",
+            SDL_GetError()
+        );
+        SDL_Texture *texture = (SDL_Texture *)CHECK_PTR(SDL_CreateTextureFromSurface(renderer, text),
+            "Failed to create texture from surface: %s",
+            SDL_GetError()
+        );
+        SDL_RenderCopy(renderer, texture, NULL, &cursor_rect);
+    }
     SDL_RenderPresent(renderer);
 }
 
@@ -122,9 +132,7 @@ int main() {
     );
 
     term_t *term = get_term(TERM_ROW, TERM_COL); 
-    SDL_Color term_fg = {RGBA(TERM_FOREGROUND)};
-    SDL_Color term_bg = {RGBA(TERM_BACKGROUND)};
-    SDL_SetRenderDrawColor(renderer, term_bg.r, term_bg.g, term_bg.b, term_bg.a);
+    SDL_SetRenderDrawColor(renderer, RGBA(TERM_BACKGROUND));
     SDL_RenderClear(renderer);
     SDL_Rect rect = {.x = term->cur_x * font.w, .y = term->cur_y * font.h, .w = font.w, .h = font.h};
     draw_cursor(renderer, &rect, TERM_FOREGROUND);
@@ -167,22 +175,22 @@ int main() {
         }
 
         if(SDL_PollEvent(&event)) {
+            #define WRITE_MASTER(str, len) {write(pty->master, str, len);}
+            char str[2] = {'\0', '\0'};
             switch (event.type) {
-                case SDL_QUIT: running = 0; break;
-                case SDL_KEYDOWN:
-                    switch (event.key.keysym.sym) {
-                        case SDLK_RETURN:  {
-                                write(pty->master, "\n", 1);
-                            }
-                            break;  
-                        case SDLK_BACKSPACE: {
-                            }
-                            break;
+                CASE(SDL_QUIT,      running = 0);
+                CASE(SDL_KEYDOWN,   switch (event.key.keysym.sym) {
+                        CASE(SDLK_BACKSPACE, str[0] = ANSI_BACKSPACE; WRITE_MASTER(str, 1));
+                        CASE(SDLK_RETURN,    str[0] = ANSI_RETURN; WRITE_MASTER(str, 1));
+                        CASE(SDLK_ESCAPE,    str[0] = ANSI_ESCAPE; WRITE_MASTER(str, 1));
+                        CASE(SDLK_TAB,       str[0] = ANSI_TAB; WRITE_MASTER(str, 1));
+                        CASE(SDLK_UP,        WRITE_MASTER(ANSI_UP, 3));
+                        CASE(SDLK_RIGHT,     WRITE_MASTER(ANSI_RIGHT, 3));
+                        CASE(SDLK_LEFT,      WRITE_MASTER(ANSI_LEFT, 3));
+                        CASE(SDLK_DOWN,      WRITE_MASTER(ANSI_DOWN, 3));
                     }
-                    break;
-                case SDL_TEXTINPUT:
-                    write(pty->master, event.text.text, strlen(event.text.text));
-                    break;
+                );
+                CASE(SDL_TEXTINPUT, WRITE_MASTER(event.text.text, strlen(event.text.text)););
             }
         }
     }

@@ -9,6 +9,19 @@
 #define RGBA_R(rgba) (rgba >> 24) & 0x000ff
 #define RGBA(rgba) RGBA_R(rgba), RGBA_G(rgba), RGBA_B(rgba), RGBA_A(rgba)
 
+#define ANSI_BELL       '\x07'
+#define ANSI_BACKSPACE  '\x08'
+#define ANSI_TAB        '\x09'
+#define ANSI_NEWLINE    '\x0a'
+#define ANSI_RETURN     '\x0d'
+#define ANSI_ESCAPE     '\x1b'
+
+// cursor control
+#define ANSI_UP         "\x1b[A"
+#define ANSI_DOWN       "\x1b[B"
+#define ANSI_RIGHT      "\x1b[C"
+#define ANSI_LEFT       "\x1b[D"
+
 #define CHECK(result, ...) \
     if (result < 0) { \
         fprintf(stderr, __VA_ARGS__); \
@@ -23,5 +36,7 @@
     } \
     ptr; \
 })
+
+#define CASE(value, code) case value: {{code;} break;}
 
 #endif // !__UTIL_H__
