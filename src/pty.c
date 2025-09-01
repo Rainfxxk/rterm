@@ -78,6 +78,7 @@ PTY *open_pty(){
 
 int spawn(PTY *pty) {
     pid_t p;
+    // char *env[] = { "TERM=xterm-256color", NULL };
     char *env[] = { "TERM=dumb", NULL };
 
     p = fork();
