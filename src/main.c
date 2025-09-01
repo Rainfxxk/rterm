@@ -1,6 +1,5 @@
 #include <bits/types/struct_timeval.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <string.h>
 #include <sys/select.h>
 #include <unistd.h>
@@ -15,27 +14,28 @@
 #include <SDL2/SDL_ttf.h>
 #include <SDL2/SDL_video.h>
 #include <SDL2/SDL.h>
+#include "config.h"
 #include "pty.h"
 #include "term.h"
 #include "util.h"
 
-#define MIN(a, b) (a > b? b : a)
-#define MAX(a, b) (a > b? a : b)
 
-#define TERM_COL 125
-#define TERM_ROW 35
-#define FONT_SIZE 15
 #define BUFFER_SIZE 4096
-#define TERM_BACKGROUND 0x22272eff
-#define TERM_FOREGROUND 0xadbac7ff
-
-
 char buffer[BUFFER_SIZE + 1];
 
 typedef struct Font {
     TTF_Font *ttf;
     int w, h;
 } Font;
+
+void init() {
+    CHECK(
+        SDL_Init(SDL_INIT_EVERYTHING),
+        "Failed to init sdl: %s",
+        SDL_GetError()
+    );
+    CHECK(TTF_Init(), "Failed to init sdl ttf: %s", SDL_GetError());
+}
 
 Font open_font(char *font_file) {
     Font font;
@@ -58,9 +58,50 @@ void close_font(Font font) {
     TTF_CloseFont(font.ttf);
 }
 
-void draw_cursor(SDL_Renderer *renderer, SDL_Rect *rect, unsigned rgba) {
-    SDL_SetRenderDrawColor(renderer, RGBA(rgba));
-    SDL_RenderFillRect(renderer, rect);
+void draw_text(SDL_Renderer *renderer, const char *str, Font *font, arg_t arg, SDL_Rect *rect) {
+    SDL_Color fg = {RGBA(arg.fg)};
+
+    SDL_Surface *text = (SDL_Surface *)CHECK_PTR(
+        TTF_RenderText_Blended(font->ttf, str, fg),
+        "Failed to render text: %s",
+        SDL_GetError()
+    );
+
+    SDL_Texture *texture = (SDL_Texture *)CHECK_PTR(SDL_CreateTextureFromSurface(renderer, text),
+        "Failed to create texture from surface: %s",
+        SDL_GetError()
+    );
+
+    SDL_RenderCopy(renderer, texture, NULL, rect);
+}
+
+void draw_line(SDL_Renderer *renderer, tchar_t *line, Font *font, int r, int c) {
+    if (line[0].ch == '\0') return;
+    arg_t arg = line[0].arg;
+    char buf[c + 1];
+    char *ptr = buf;
+    for (int i = 0; i < c + 1; i++) {
+        buf[i] = line[i].ch;
+        if (line[i].ch == '\0' || memcmp(&line[i].arg, &arg, sizeof(arg_t)) != 0) {
+            buf[i] = '\0';
+            SDL_Rect rect = {.x = (ptr - buf) * font->w, .y = r * font->h, .w = (i - (ptr - buf)) * font->w, .h = font->h};
+            draw_text(renderer, ptr, font, arg, &rect);
+            ptr = buf + i;
+            arg = line[i].arg;
+            if (line[i].ch == '\0') return;
+            buf[i] = line[i].ch;
+        }
+    }
+}
+
+void draw_cursor(SDL_Renderer *renderer, term_t *term, Font *font) {
+    SDL_Rect cursor_rect = {.x = term->cur_x * font->w, .y = term->cur_y * font->h, .w = font->w, .h = font->h};
+    SDL_SetRenderDrawColor(renderer, RGBA(TERM_CURSOR_BG));
+    if (term->screen[term->cur_y][term->cur_x].ch != '\0') {
+        char ch[2] = {term->screen[term->cur_y][term->cur_x].ch, '\0'};
+        draw_text(renderer, ch, font, term->arg, &cursor_rect);
+    }
+    SDL_RenderFillRect(renderer, &cursor_rect);
 }
 
 void draw_term(SDL_Renderer *renderer, term_t *term, Font *font) {
@@ -70,48 +111,12 @@ void draw_term(SDL_Renderer *renderer, term_t *term, Font *font) {
     SDL_SetRenderDrawColor(renderer, term_bg.r, term_bg.g, term_bg.b, term_bg.a);
     SDL_RenderClear(renderer);
 
-    for (int i = 0; i < term->r; i++) {
-        int len = strlen(term->screen[i]);
-        if (len == 0) {
-            continue;
-        }
-        SDL_Rect text_rect = {.x = 0, .y = i * font->h, .w = font->w * len, .h = font->h};
-        SDL_Surface *text = (SDL_Surface *)CHECK_PTR(
-            TTF_RenderText_Blended(font->ttf, term->screen[i], term_fg),
-            "Failed to render text: %s",
-            SDL_GetError()
-        );
-        SDL_Texture *texture = (SDL_Texture *)CHECK_PTR(SDL_CreateTextureFromSurface(renderer, text),
-            "Failed to create texture from surface: %s",
-            SDL_GetError()
-        );
-        SDL_RenderCopy(renderer, texture, NULL, &text_rect);
+    char text[2] = {'a', '\0'};
+    for (int j = 0; j < term->r; j++) {
+        draw_line(renderer, term->screen[j], font, j, term->c);
     }
-    SDL_Rect cursor_rect = {.x = term->cur_x * font->w, .y = term->cur_y * font->h, .w = font->w, .h = font->h};
-    draw_cursor(renderer, &cursor_rect, TERM_FOREGROUND);
-    if (term->screen[term->cur_y][term->cur_x] != '\0') {
-        char ch[2] = {term->screen[term->cur_y][term->cur_x], '\0'};
-        SDL_Surface *text = (SDL_Surface *)CHECK_PTR(
-            TTF_RenderText_Blended(font->ttf, ch, term_bg),
-            "Failed to render text: %s",
-            SDL_GetError()
-        );
-        SDL_Texture *texture = (SDL_Texture *)CHECK_PTR(SDL_CreateTextureFromSurface(renderer, text),
-            "Failed to create texture from surface: %s",
-            SDL_GetError()
-        );
-        SDL_RenderCopy(renderer, texture, NULL, &cursor_rect);
-    }
+    draw_cursor(renderer, term, font);
     SDL_RenderPresent(renderer);
-}
-
-void init() {
-    CHECK(
-              SDL_Init(SDL_INIT_EVERYTHING),
-              "Failed to init sdl: %s",
-              SDL_GetError()
-    );
-    CHECK(TTF_Init(), "Failed to init sdl ttf: %s", SDL_GetError());
 }
 
 int main() {
@@ -134,8 +139,6 @@ int main() {
     term_t *term = get_term(TERM_ROW, TERM_COL); 
     SDL_SetRenderDrawColor(renderer, RGBA(TERM_BACKGROUND));
     SDL_RenderClear(renderer);
-    SDL_Rect rect = {.x = term->cur_x * font.w, .y = term->cur_y * font.h, .w = font.w, .h = font.h};
-    draw_cursor(renderer, &rect, TERM_FOREGROUND);
     SDL_RenderPresent(renderer);
 
     int running = 1;
@@ -145,10 +148,8 @@ int main() {
     term_set_size(pty, TERM_ROW, TERM_COL);
     spawn(pty);
 
-
-    int maxfd;
+    int maxfd = pty->master;
     fd_set readable;
-    maxfd = pty->master;
 
     while (running) {
         FD_ZERO(&readable);

@@ -15,6 +15,8 @@ $ git clone https://github.com/Rainfxxk/rterm.git
 $ make
 ```
 
+Now, rterm support some color display experimentally, you can run command `export TERM=xterm-256colr` or change the `env` variable in function `pty.c: int spawn(PTY *pty)` to try it, but it still not work well.
+
 ## TODO
 
 - 256 and true color support

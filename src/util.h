@@ -3,6 +3,10 @@
 
 #include <stdio.h>
 
+
+#define MIN(a, b) (a > b? b : a)
+#define MAX(a, b) (a > b? a : b)
+
 #define RGBA_A(rgba) rgba & 0x000ff
 #define RGBA_B(rgba) (rgba >> 8) & 0x000ff
 #define RGBA_G(rgba) (rgba >> 16) & 0x000ff
@@ -38,5 +42,10 @@
 })
 
 #define CASE(value, code) case value: {{code;} break;}
+#define CASE_NOBREAK(value, ...) \
+    case value: \
+    CASE_NOBREAK(##__VA_ARGS__)
+    
+#define CASE_SEQ(value, ...) CASE_NOBREAK()
 
 #endif // !__UTIL_H__
