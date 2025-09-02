@@ -1,4 +1,5 @@
-#include <bits/types/struct_timeval.h>
+#include <SDL2/SDL_timer.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <string.h>
 #include <sys/select.h>
@@ -19,6 +20,9 @@
 #include "term.h"
 #include "util.h"
 
+
+term_t *term; 
+PTY *pty;
 
 #define BUFFER_SIZE 4096
 char buffer[BUFFER_SIZE + 1];
@@ -105,18 +109,55 @@ void draw_cursor(SDL_Renderer *renderer, term_t *term, Font *font) {
 }
 
 void draw_term(SDL_Renderer *renderer, term_t *term, Font *font) {
-    SDL_Color term_fg = {RGBA(TERM_FOREGROUND)};
     SDL_Color term_bg = {RGBA(TERM_BACKGROUND)};
-
     SDL_SetRenderDrawColor(renderer, term_bg.r, term_bg.g, term_bg.b, term_bg.a);
     SDL_RenderClear(renderer);
 
-    char text[2] = {'a', '\0'};
     for (int j = 0; j < term->r; j++) {
         draw_line(renderer, term->screen[j], font, j, term->c);
     }
+
     draw_cursor(renderer, term, font);
     SDL_RenderPresent(renderer);
+}
+
+struct run_term_arg_t {
+    PTY *pty;
+    term_t *term;
+};
+void *run_term(void *arg) {
+    struct run_term_arg_t *run_term_arg = (struct run_term_arg *)CHECK_PTR(arg, "run_term get a NULL"); 
+    PTY *pty = run_term_arg->pty;
+    term_t *term = run_term_arg->term;
+    int maxfd = pty->master;
+    fd_set readable;
+    FD_ZERO(&readable);
+    FD_SET(pty->master, &readable);
+    // struct timeval timeout = {.tv_sec = 0, .tv_usec = 0};
+    
+    while (1) {
+        int select_res = select(maxfd + 1, &readable, NULL, NULL, NULL);
+        if (select_res == -1) {
+            perror("select");
+            break;
+        }
+
+        if (FD_ISSET(pty->master, &readable) && select_res > 0) {
+            int len = read(pty->master, buffer, BUFFER_SIZE);
+            if (len <= 0) {
+                fprintf(stderr, "Nothing to read from child: ");
+                perror(NULL);
+                break;
+            }
+            buffer[len] = '\0';
+
+            term_write(term, buffer);
+            SDL_Event event = {.type = SDL_REDRAW};
+            SDL_PushEvent(&event);
+        }
+    }
+
+    return arg;
 }
 
 int main() {
@@ -136,63 +177,41 @@ int main() {
         SDL_GetError()
     );
 
-    term_t *term = get_term(TERM_ROW, TERM_COL); 
     SDL_SetRenderDrawColor(renderer, RGBA(TERM_BACKGROUND));
     SDL_RenderClear(renderer);
     SDL_RenderPresent(renderer);
 
-    int running = 1;
-    SDL_Event event;
-    SDL_StartTextInput();
+    term_t *term = get_term(TERM_ROW, TERM_COL); 
     PTY *pty = open_pty();
     term_set_size(pty, TERM_ROW, TERM_COL);
     spawn(pty);
 
-    int maxfd = pty->master;
-    fd_set readable;
+    pthread_t term_thread;
+    struct run_term_arg_t arg = {.pty = pty, .term = term};
+    CHECK(pthread_create(&term_thread, NULL, run_term, &arg), "Failed to create term thread");
 
+    int running = 1;
+    SDL_Event event;
+    SDL_StartTextInput();
     while (running) {
-        FD_ZERO(&readable);
-        FD_SET(pty->master, &readable);
-
-        struct timeval timeout = {.tv_sec = 0, .tv_usec = 0};
-        int select_res = select(maxfd + 1, &readable, NULL, NULL, &timeout);
-        if (select_res == -1) {
-            perror("select");
-            return 1;
-        }
-
-        if (FD_ISSET(pty->master, &readable) && select_res > 0) {
-            int len = read(pty->master, buffer, BUFFER_SIZE);
-            if (len <= 0) {
-                fprintf(stderr, "Nothing to read from child: ");
-                perror(NULL);
-                return 1;
-            }
-            buffer[len] = '\0';
-
-            term_write(term, buffer);
-            draw_term(renderer, term, &font);
-        }
-
-        if(SDL_PollEvent(&event)) {
-            #define WRITE_MASTER(str, len) {write(pty->master, str, len);}
-            char str[2] = {'\0', '\0'};
-            switch (event.type) {
-                CASE(SDL_QUIT,      running = 0);
-                CASE(SDL_KEYDOWN,   switch (event.key.keysym.sym) {
-                        CASE(SDLK_BACKSPACE, str[0] = ANSI_BACKSPACE; WRITE_MASTER(str, 1));
-                        CASE(SDLK_RETURN,    str[0] = ANSI_RETURN; WRITE_MASTER(str, 1));
-                        CASE(SDLK_ESCAPE,    str[0] = ANSI_ESCAPE; WRITE_MASTER(str, 1));
-                        CASE(SDLK_TAB,       str[0] = ANSI_TAB; WRITE_MASTER(str, 1));
-                        CASE(SDLK_UP,        WRITE_MASTER(ANSI_UP, 3));
-                        CASE(SDLK_RIGHT,     WRITE_MASTER(ANSI_RIGHT, 3));
-                        CASE(SDLK_LEFT,      WRITE_MASTER(ANSI_LEFT, 3));
-                        CASE(SDLK_DOWN,      WRITE_MASTER(ANSI_DOWN, 3));
-                    }
-                );
-                CASE(SDL_TEXTINPUT, WRITE_MASTER(event.text.text, strlen(event.text.text)););
-            }
+        SDL_WaitEvent(&event);
+        #define WRITE_MASTER(str, len) {write(pty->master, str, len);}
+        char str[2] = {'\0', '\0'};
+        switch (event.type) {
+            CASE(SDL_QUIT,      running = 0);
+            CASE(SDL_KEYDOWN,   switch (event.key.keysym.sym) {
+                    CASE(SDLK_BACKSPACE, str[0] = ANSI_BACKSPACE; WRITE_MASTER(str, 1));
+                    CASE(SDLK_RETURN,    str[0] = ANSI_RETURN; WRITE_MASTER(str, 1));
+                    CASE(SDLK_ESCAPE,    str[0] = ANSI_ESCAPE; WRITE_MASTER(str, 1));
+                    CASE(SDLK_TAB,       str[0] = ANSI_TAB; WRITE_MASTER(str, 1));
+                    CASE(SDLK_UP,        WRITE_MASTER(ANSI_UP, 3));
+                    CASE(SDLK_RIGHT,     WRITE_MASTER(ANSI_RIGHT, 3));
+                    CASE(SDLK_LEFT,      WRITE_MASTER(ANSI_LEFT, 3));
+                    CASE(SDLK_DOWN,      WRITE_MASTER(ANSI_DOWN, 3));
+                }
+            );
+            CASE(SDL_TEXTINPUT, WRITE_MASTER(event.text.text, strlen(event.text.text)););
+            CASE(SDL_REDRAW, draw_term(renderer, term, &font););
         }
     }
 

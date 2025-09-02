@@ -48,7 +48,8 @@ void set_color(term_t *term) {
     }
     else for(unsigned i = 0; i < term->paser.num_par; i++) {
         unsigned par = term->paser.par[i];
-        if (par == 0) {term->arg.bg = TERM_BACKGROUND; term->arg.fg = TERM_FOREGROUND;}
+        if (par == 0) {term->arg.bg = TERM_BACKGROUND; 
+                       term->arg.fg = TERM_FOREGROUND;}
         if (par == 30) term->arg.fg = TERM_BLACK;
         if (par == 31) term->arg.fg = TERM_RED;
         if (par == 32) {term->arg.fg = TERM_GREEN;}
@@ -72,48 +73,95 @@ void set_color(term_t *term) {
     term->paser.num_par = 0;
 }
 
+void cursor_control(term_t *term, char func) {
+    int first = term->paser.par[0] == 0? 0 : term->paser.par[0];
+    int second = term->paser.par[0] == 0? 0 : term->paser.par[0];
+    switch (func) {
+        CASE('A', term->cur_y = MIN(term->r - 1, term->cur_y + first););
+        CASE('B', term->cur_y = MAX(0,           term->cur_y - first););
+        CASE('C', term->cur_x = MAX(term->c - 1, term->cur_x + first););
+        CASE('D', term->cur_x = MAX(0,           term->cur_x - first););
+        CASE('E', term->cur_y = MAX(0,           term->cur_y - first););
+        CASE('F', term->cur_y = MIN(term->r - 1, term->cur_y + first););
+        CASE('G', term->cur_y = MIN(term->r - 1,       MAX(0, first)););
+        CASE('H', term->cur_y = MIN(term->r - 1,      MAX(0, first));
+                  term->cur_x = MIN(term->c - 1,      MAX(0, second)););
+    }
+}
+
+void _erase_line(term_t *term, int r, int c, int func) {
+    arg_t arg = {.bg = TERM_BACKGROUND, .fg = TERM_FOREGROUND};
+    tchar_t erase = {.ch = '\0', arg = arg};
+
+    switch (func) {
+        CASE(0, for(int i = c; i < term->c; i++) term->screen[r][i] = erase);
+        CASE(1, for(int i = 0; i < c;       i++) term->screen[r][i] = erase);
+        CASE(2, for(int i = 0; i < term->c; i++) term->screen[r][i] = erase);
+    }
+}
+
+void erase_line(term_t *term) {
+    int func = term->paser.par[0];
+    _erase_line(term, term->cur_y, term->cur_x, func);
+}
+
+void erase_display(term_t *term) {
+
+    // this is a very interesting wry to erase screen, at least I think so.
+    // as the ansi standard describe:
+    // 0(0b000) for erase after the cursor
+    // 1(0b001) for erase before the cursor
+    // 2(0b010) for erase the whole screen
+    // 3(0b011) for erase the sceen and buffer
+    // but when func plus 1, this ganna happen:
+    // 1(0b001) for erase after the cursor
+    // 2(0b010) for erase before the cursor
+    // 3(0b011) for erase the whole screen
+    // 4(0b100) for erase the sceen and buffer
+    // then you will found:
+    // 0th bit for erase after the cursor
+    // 1th bit for erase after the cursor
+    // 2th bit for erase every thing
+    
+    int func = term->paser.par[0] + 1;
+    if (func        & 0b1) for (int i = term->cur_y; i < term->r; i++) _erase_line(term, i, term->cur_x, i == term->cur_y? 0: 2);
+    if ((func >> 1) & 0b1) for (int i = term->cur_y; i > -1;      i--) _erase_line(term, i, term->cur_x, i == term->cur_y? 1: 2);
+    if ((func >> 2) & 0b1) for (int i = 0;           i < term->r; i++) _erase_line(term, i, 0, 2);
+
+}
+
 void reset_paser(term_t *term) {
-    memset(term->paser.par, 0, PARAMETER_NUM);
+    memset(term->paser.par, 0, PARAMETER_NUM * sizeof(unsigned));
     term->paser.num_par = 0;
     term->paser.state = STATE_NORMAL;
 }
 
 int handle_ansi(term_t *term, const char ch) {
-    #define STATE(STATE, CODE)      if (term->paser.state == STATE) {CODE; return 1;} break; 
+    #define STATE(STATE, CODE)      if (term->paser.state == STATE) {CODE; return 1;}
     #define NORMAL_STATE(CODE)      STATE(STATE_NORMAL, CODE)
     #define ESCAPE_STATE(CODE)      STATE(STATE_ESCAPE, CODE)
     #define ARGUMENT_STATE(CODE)    STATE(STATE_ARGUMENT, CODE)
 
-    // if (ch == ANSI_ESCAPE) printf("^[");
-    // else printf("%c", ch); 
-    switch(ch) {
-        CASE(ANSI_BELL, return 1;);
-        CASE(ANSI_BACKSPACE, term->screen[term->cur_y][--term->cur_x].ch = '\0'; return 1;);
-        CASE(ANSI_NEWLINE, if(!term->just_wraped) { term->cur_y++; term->just_wraped = 0; } return 1;);
-        CASE(ANSI_RETURN, term->cur_x = 0; return 1;);
-        CASE(ANSI_ESCAPE, term->paser.state = STATE_ESCAPE; return 1;);
-        case '[':  ESCAPE_STATE(term->paser.state = STATE_ARGUMENT; return 1;);
-        case ';':  ARGUMENT_STATE(term->paser.num_par++; return 1;)
-        case '1':
-        case '2':
-        case '3':
-        case '4':
-        case '5':
-        case '6':
-        case '7':
-        case '8':
-        case '9':
-        case '0': ARGUMENT_STATE(term->paser.state = STATE_ARGUMENT; term->paser.par[term->paser.num_par] = term->paser.par[term->paser.num_par] * 10 + ch - '0'; return 1; )
-        case 'm': ARGUMENT_STATE(term->paser.num_par++; set_color(term); reset_paser(term); return 1;)
-        // case 'A': ARGUMENT_STATE(; return 1;);
-        // case 'B': ARGUMENT_STATE(; return 1;);
-        // case 'C': ARGUMENT_STATE(; return 1;);
-        // case 'D': ARGUMENT_STATE(; return 1;);
-        // case 'E': ARGUMENT_STATE(; return 1;);
-        // case 'F': ARGUMENT_STATE(; return 1;);
-        // case 'G': ARGUMENT_STATE(; return 1;);
-        // case 'H': ARGUMENT_STATE(; return 1;);
-    }
+    if (ch == ANSI_BELL       ) { return 1;                                                                  }
+    if (ch == ANSI_BACKSPACE  ) { term->screen[term->cur_y][--term->cur_x].ch = '\0'; return 1;              }
+    if (ch == ANSI_NEWLINE    ) { if(!term->just_wraped) { term->cur_y++; term->just_wraped = 0; } return 1; }
+    if (ch == ANSI_RETURN     ) { term->cur_x = 0; return 1;                                                 }
+    if (ch == ANSI_ESCAPE     ) { term->paser.state = STATE_ESCAPE; return 1;                                }
+    if (ch == '['             ) { ESCAPE_STATE(term->paser.state = STATE_ARGUMENT; return 1;)                }
+    if (ch == ';'             ) { ARGUMENT_STATE(term->paser.num_par++; return 1;)                           }
+    if (ch >= '0' && ch <= '9') { ARGUMENT_STATE(term->paser.state = STATE_ARGUMENT;
+                                                 int n = term->paser.num_par;
+                                                 term->paser.par[n] = term->paser.par[n] * 10 + ch - '0'; 
+                                                 return 1; )                                                 }
+    if (ch == 'm'             ) { ARGUMENT_STATE(term->paser.num_par++;
+                                                 set_color(term);          reset_paser(term); return 1;)     }
+    if (ch >= 'A' && ch <= 'H') { ARGUMENT_STATE(term->paser.num_par++;
+                                                 cursor_control(term, ch); reset_paser(term); return 1;)     }
+    if (ch == 'J'             ) { ARGUMENT_STATE(term->paser.num_par++;
+                                                 erase_display(term);      reset_paser(term); return 1;)     }
+    if (ch == 'K'             ) { ARGUMENT_STATE(term->paser.num_par++;
+                                                 erase_line(term);         reset_paser(term); return 1;)     }
+
     reset_paser(term);
     return 0;
 }
