@@ -1,5 +1,5 @@
 CC		:= gcc
-CFLAGS 	:= -Wall -Wextra
+CFLAGS 	:= -Wall -Wextra -g
 LFLAGS	:= -lSDL2 -lSDL2_ttf
 
 SRC_DIR := ./src

@@ -7,6 +7,8 @@
 #define MIN(a, b) (a > b? b : a)
 #define MAX(a, b) (a > b? a : b)
 
+#define SDL_REDRAW (SDL_USEREVENT + 1)
+
 #define RGBA_A(rgba) rgba & 0x000ff
 #define RGBA_B(rgba) (rgba >> 8) & 0x000ff
 #define RGBA_G(rgba) (rgba >> 16) & 0x000ff
