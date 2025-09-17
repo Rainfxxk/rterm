@@ -127,7 +127,7 @@ struct run_term_arg_t {
 };
 
 void *run_term(void *arg) {
-    struct run_term_arg_t *run_term_arg = (struct run_term_arg *)CHECK_PTR(arg, "run_term get a NULL"); 
+    struct run_term_arg_t *run_term_arg = (struct run_term_arg_t *)CHECK_PTR(arg, "run_term get a NULL"); 
     PTY *pty = run_term_arg->pty;
     term_t *term = run_term_arg->term;
     int maxfd = pty->master;
@@ -164,8 +164,8 @@ void *run_term(void *arg) {
 void *callback(int type, void *arg) {
     SDL_UserEvent user = {.type = SDL_USEREVENT + type, .data1 = arg};
     SDL_Event event = {.user = user};
-    printf("call %p\n", event.user.data1);
     SDL_PushEvent(&event);
+    return NULL;
 }
 
 int main() {
@@ -174,7 +174,7 @@ int main() {
     font_t font = open_font("./font.ttf");
 
     SDL_Window *win = (SDL_Window *)CHECK_PTR(
-        SDL_CreateWindow("rterm", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, font.w * TERM_COL, font.h * TERM_ROW, SDL_WINDOW_RESIZABLE ); // | SDL_WINDOW_BORDERLESS),
+        SDL_CreateWindow("rterm", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, font.w * TERM_COL, font.h * TERM_ROW, SDL_WINDOW_RESIZABLE ), // | SDL_WINDOW_BORDERLESS),
         "Failed to create window: %s",
         SDL_GetError()
     );
