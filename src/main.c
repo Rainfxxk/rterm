@@ -27,10 +27,10 @@ PTY *pty;
 #define BUFFER_SIZE 4096
 char buffer[BUFFER_SIZE + 1];
 
-typedef struct Font {
+typedef struct font_t {
     TTF_Font *ttf;
     int w, h;
-} Font;
+} font_t;
 
 void init() {
     CHECK(
@@ -41,8 +41,8 @@ void init() {
     CHECK(TTF_Init(), "Failed to init sdl ttf: %s", SDL_GetError());
 }
 
-Font open_font(char *font_file) {
-    Font font;
+font_t open_font(char *font_file) {
+    font_t font;
     TTF_Font *ttf_font = (TTF_Font *)CHECK_PTR(
                       TTF_OpenFont(font_file, FONT_SIZE),
                       "Failed to open font: %s",
@@ -58,11 +58,11 @@ Font open_font(char *font_file) {
     return font;
 }
 
-void close_font(Font font) {
+void close_font(font_t font) {
     TTF_CloseFont(font.ttf);
 }
 
-void draw_text(SDL_Renderer *renderer, const char *str, Font *font, arg_t arg, SDL_Rect *rect) {
+void draw_text(SDL_Renderer *renderer, const char *str, font_t *font, arg_t arg, SDL_Rect *rect) {
     SDL_Color fg = {RGBA(arg.fg)};
 
     SDL_Surface *text = (SDL_Surface *)CHECK_PTR(
@@ -79,7 +79,7 @@ void draw_text(SDL_Renderer *renderer, const char *str, Font *font, arg_t arg, S
     SDL_RenderCopy(renderer, texture, NULL, rect);
 }
 
-void draw_line(SDL_Renderer *renderer, tchar_t *line, Font *font, int r, int c) {
+void draw_line(SDL_Renderer *renderer, tchar_t *line, font_t *font, int r, int c) {
     if (line[0].ch == '\0') return;
     arg_t arg = line[0].arg;
     char buf[c + 1];
@@ -98,7 +98,7 @@ void draw_line(SDL_Renderer *renderer, tchar_t *line, Font *font, int r, int c) 
     }
 }
 
-void draw_cursor(SDL_Renderer *renderer, term_t *term, Font *font) {
+void draw_cursor(SDL_Renderer *renderer, term_t *term, font_t *font) {
     SDL_Rect cursor_rect = {.x = term->cur_x * font->w, .y = term->cur_y * font->h, .w = font->w, .h = font->h};
     SDL_SetRenderDrawColor(renderer, RGBA(TERM_CURSOR_BG));
     if (term->screen[term->cur_y][term->cur_x].ch != '\0') {
@@ -108,7 +108,7 @@ void draw_cursor(SDL_Renderer *renderer, term_t *term, Font *font) {
     SDL_RenderFillRect(renderer, &cursor_rect);
 }
 
-void draw_term(SDL_Renderer *renderer, term_t *term, Font *font) {
+void draw_term(SDL_Renderer *renderer, term_t *term, font_t *font) {
     SDL_Color term_bg = {RGBA(TERM_BACKGROUND)};
     SDL_SetRenderDrawColor(renderer, term_bg.r, term_bg.g, term_bg.b, term_bg.a);
     SDL_RenderClear(renderer);
@@ -125,8 +125,9 @@ struct run_term_arg_t {
     PTY *pty;
     term_t *term;
 };
+
 void *run_term(void *arg) {
-    struct run_term_arg_t *run_term_arg = (struct run_term_arg *)CHECK_PTR(arg, "run_term get a NULL"); 
+    struct run_term_arg_t *run_term_arg = (struct run_term_arg_t *)CHECK_PTR(arg, "run_term get a NULL"); 
     PTY *pty = run_term_arg->pty;
     term_t *term = run_term_arg->term;
     int maxfd = pty->master;
@@ -147,26 +148,33 @@ void *run_term(void *arg) {
             if (len <= 0) {
                 fprintf(stderr, "Nothing to read from child: ");
                 perror(NULL);
+                SDL_Event event = {.type = SDL_QUIT};
+                SDL_PushEvent(&event);
                 break;
             }
             buffer[len] = '\0';
 
             term_write(term, buffer);
-            SDL_Event event = {.type = SDL_REDRAW};
-            SDL_PushEvent(&event);
         }
     }
 
     return arg;
 }
 
+void *callback(int type, void *arg) {
+    SDL_UserEvent user = {.type = SDL_USEREVENT + type, .data1 = arg};
+    SDL_Event event = {.user = user};
+    SDL_PushEvent(&event);
+    return NULL;
+}
+
 int main() {
     init();
 
-    Font font = open_font("./font.ttf");
+    font_t font = open_font("./font.ttf");
 
     SDL_Window *win = (SDL_Window *)CHECK_PTR(
-        SDL_CreateWindow("rterm", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, font.w * TERM_COL, font.h * TERM_ROW, SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS),
+        SDL_CreateWindow("rterm", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, font.w * TERM_COL, font.h * TERM_ROW, SDL_WINDOW_RESIZABLE ), // | SDL_WINDOW_BORDERLESS),
         "Failed to create window: %s",
         SDL_GetError()
     );
@@ -182,6 +190,7 @@ int main() {
     SDL_RenderPresent(renderer);
 
     term_t *term = get_term(TERM_ROW, TERM_COL); 
+    term->callback = callback;
     PTY *pty = open_pty();
     term_set_size(pty, TERM_ROW, TERM_COL);
     spawn(pty);
@@ -212,6 +221,7 @@ int main() {
             );
             CASE(SDL_TEXTINPUT, WRITE_MASTER(event.text.text, strlen(event.text.text)););
             CASE(SDL_REDRAW, draw_term(renderer, term, &font););
+            CASE(SDL_SETTITLE, SDL_SetWindowTitle(win, (const char *)event.user.data1); free(event.user.data1));
         }
     }
 

@@ -14,13 +14,23 @@ typedef struct tchar_t {
 
 typedef struct ansi_paser_t {
     unsigned num_par;
-    unsigned par[PARAMETER_NUM];
+    unsigned ps;
+    unsigned pm[PM_NUM];
+    char pt[PT_LEN];
+    unsigned pt_len;
     enum paser_state {
-        STATE_NORMAL,
-        STATE_ESCAPE,
-        STATE_ARGUMENT,
+        NORMAL,
+        ESCAPE,
+        CSI,
+        OSC,
     } state;
 } ansi_paser_t;
+
+enum callback_event {
+    NONE = 0,
+    REDRAW = 1,
+    SET_TITLE = 2,
+};
 
 typedef struct term_t {
     int r, c;
@@ -29,6 +39,7 @@ typedef struct term_t {
     tchar_t **screen;
     arg_t arg;
     ansi_paser_t paser;
+    void *(*callback)(int, void *);
 }term_t ;
 
 term_t *get_term(int r, int c);

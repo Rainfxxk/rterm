@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "config.h"
 #include "term.h"
 #include "util.h"
@@ -14,6 +15,18 @@
 //     unsigned num_par;
 //     unsigned par[PARAMETER_NUM];
 // }term_t ;
+void *_callback(int, void *) {
+    return NULL;
+}
+
+void reset_paser(term_t *term) {
+    term->paser.ps = 0;
+    memset(term->paser.pm, 0, PM_NUM * sizeof(unsigned));
+    memset(term->paser.pt, 0, PT_LEN * sizeof(char));
+    term->paser.pt_len = 0;
+    term->paser.num_par = 0;
+    term->paser.state = NORMAL;
+}
 
 term_t *get_term(int r, int c) {
     term_t *term = (term_t *)CHECK_PTR(malloc(sizeof(term_t)), "no memory for malloc a term_t");
@@ -35,9 +48,8 @@ term_t *get_term(int r, int c) {
         }
     }
 
-    term->paser.state = STATE_NORMAL;
-    term->paser.num_par = 0;
-    for (int i = 0; i < PARAMETER_NUM; i++) term->paser.par[i] = 0;
+    reset_paser(term);
+    term->callback = _callback;
 
     return term;
 }
@@ -47,7 +59,7 @@ void set_color(term_t *term) {
         term->arg.bg = TERM_BACKGROUND; term->arg.bg = TERM_FOREGROUND;
     }
     else for(unsigned i = 0; i < term->paser.num_par; i++) {
-        unsigned par = term->paser.par[i];
+        unsigned par = term->paser.pm[i];
         if (par == 0) {term->arg.bg = TERM_BACKGROUND; 
                        term->arg.fg = TERM_FOREGROUND;}
         if (par == 30) term->arg.fg = TERM_BLACK;
@@ -68,14 +80,14 @@ void set_color(term_t *term) {
         if (par == 46) term->arg.bg = TERM_CYAN;
         if (par == 47) term->arg.bg = TERM_WHITE;
         if (par == 49) term->arg.bg = TERM_FOREGROUND;
-        term->paser.par[i] = 0;
+        term->paser.pm[i] = 0;
     }
     term->paser.num_par = 0;
 }
 
 void cursor_control(term_t *term, char func) {
-    int first = term->paser.par[0] == 0? 0 : term->paser.par[0];
-    int second = term->paser.par[0] == 0? 0 : term->paser.par[0];
+    int first = term->paser.pm[0] == 0? 0 : term->paser.pm[0];
+    int second = term->paser.pm[0] == 0? 0 : term->paser.pm[0];
     switch (func) {
         CASE('A', term->cur_y = MIN(term->r - 1, term->cur_y + first););
         CASE('B', term->cur_y = MAX(0,           term->cur_y - first););
@@ -101,7 +113,7 @@ void _erase_line(term_t *term, int r, int c, int func) {
 }
 
 void erase_line(term_t *term) {
-    int func = term->paser.par[0];
+    int func = term->paser.pm[0];
     _erase_line(term, term->cur_y, term->cur_x, func);
 }
 
@@ -123,44 +135,63 @@ void erase_display(term_t *term) {
     // 1th bit for erase after the cursor
     // 2th bit for erase every thing
     
-    int func = term->paser.par[0] + 1;
+    int func = term->paser.pm[0] + 1;
     if (func        & 0b1) for (int i = term->cur_y; i < term->r; i++) _erase_line(term, i, term->cur_x, i == term->cur_y? 0: 2);
     if ((func >> 1) & 0b1) for (int i = term->cur_y; i > -1;      i--) _erase_line(term, i, term->cur_x, i == term->cur_y? 1: 2);
     if ((func >> 2) & 0b1) for (int i = 0;           i < term->r; i++) _erase_line(term, i, 0, 2);
 
 }
 
-void reset_paser(term_t *term) {
-    memset(term->paser.par, 0, PARAMETER_NUM * sizeof(unsigned));
-    term->paser.num_par = 0;
-    term->paser.state = STATE_NORMAL;
+void osc(term_t *term) {
+    if (term->paser.ps == 0) {
+        char *title = malloc((term->paser.pt_len + 1) * sizeof(char));
+        strcpy(title, term->paser.pt);
+        term->callback(SET_TITLE, title);
+    }
 }
 
 int handle_ansi(term_t *term, const char ch) {
-    #define STATE(STATE, CODE)      if (term->paser.state == STATE) {CODE; return 1;}
-    #define NORMAL_STATE(CODE)      STATE(STATE_NORMAL, CODE)
-    #define ESCAPE_STATE(CODE)      STATE(STATE_ESCAPE, CODE)
-    #define ARGUMENT_STATE(CODE)    STATE(STATE_ARGUMENT, CODE)
+    #define STATE(STATE, CODE)      if (term->paser.state == STATE) {CODE; reset_paser(term); return 0;}
+    #define NORMAL_STATE(CODE)      STATE(NORMAL, CODE)
+    #define ESCAPE_STATE(CODE)      STATE(ESCAPE, CODE)
+    #define CSI_STATE(CODE)    STATE(CSI, CODE)
+    #define OSC_STATE(CODE)    STATE(OSC, CODE)
 
-    if (ch == ANSI_BELL       ) { return 1;                                                                  }
-    if (ch == ANSI_BACKSPACE  ) { term->screen[term->cur_y][--term->cur_x].ch = '\0'; return 1;              }
-    if (ch == ANSI_NEWLINE    ) { if(!term->just_wraped) { term->cur_y++; term->just_wraped = 0; } return 1; }
-    if (ch == ANSI_RETURN     ) { term->cur_x = 0; return 1;                                                 }
-    if (ch == ANSI_ESCAPE     ) { term->paser.state = STATE_ESCAPE; return 1;                                }
-    if (ch == '['             ) { ESCAPE_STATE(term->paser.state = STATE_ARGUMENT; return 1;)                }
-    if (ch == ';'             ) { ARGUMENT_STATE(term->paser.num_par++; return 1;)                           }
-    if (ch >= '0' && ch <= '9') { ARGUMENT_STATE(term->paser.state = STATE_ARGUMENT;
-                                                 int n = term->paser.num_par;
-                                                 term->paser.par[n] = term->paser.par[n] * 10 + ch - '0'; 
-                                                 return 1; )                                                 }
-    if (ch == 'm'             ) { ARGUMENT_STATE(term->paser.num_par++;
-                                                 set_color(term);          reset_paser(term); return 1;)     }
-    if (ch >= 'A' && ch <= 'H') { ARGUMENT_STATE(term->paser.num_par++;
-                                                 cursor_control(term, ch); reset_paser(term); return 1;)     }
-    if (ch == 'J'             ) { ARGUMENT_STATE(term->paser.num_par++;
-                                                 erase_display(term);      reset_paser(term); return 1;)     }
-    if (ch == 'K'             ) { ARGUMENT_STATE(term->paser.num_par++;
-                                                 erase_line(term);         reset_paser(term); return 1;)     }
+    NORMAL_STATE(
+        if (ch == ANSI_BELL       ) { return 1;                                                                 }
+        if (ch == ANSI_BACKSPACE  ) { term->screen[term->cur_y][--term->cur_x].ch = '\0'; return 1;             }
+        if (ch == ANSI_NEWLINE    ) { if(!term->just_wraped) { term->cur_y++; term->just_wraped = 0; } return 1;}
+        if (ch == ANSI_RETURN     ) { term->cur_x = 0; return 1;                                                }
+        if (ch == ANSI_ESCAPE     ) { term->paser.state = ESCAPE; return 1;                                     }
+    );
+    ESCAPE_STATE(
+        if (ch == '['             ) { term->paser.state = CSI; return 1;                                        }
+        if (ch == ']'             ) { term->paser.state = OSC; return 1;                                        }
+    );
+    CSI_STATE(
+        if (ch == ';'             ) { term->paser.num_par++; return 1;                                          }
+        if (ch >= '0' && ch <= '9') { int n = term->paser.num_par;
+                                      term->paser.pm[n] = term->paser.pm[n] * 10 + ch - '0'; 
+                                      return 1;                                                                 }
+        if (ch == 'm'             ) { term->paser.num_par++;
+                                      set_color(term);          reset_paser(term); return 1;                    }
+        if (ch >= 'A' && ch <= 'H') { term->paser.num_par++;
+                                      cursor_control(term, ch); reset_paser(term); return 1;                    }
+        if (ch == 'J'             ) { term->paser.num_par++;
+                                      erase_display(term);      reset_paser(term); return 1;                    }
+        if (ch == 'K'             ) { term->paser.num_par++;
+                                      erase_line(term);         reset_paser(term); return 1;                    }
+    );
+    OSC_STATE(
+        if (ch == ';'             ) { term->paser.num_par++; return 1;                                          }
+        if (ch >= '0' && ch <= '9') { if (term->paser.num_par == 0) {
+                                          int n = term->paser.num_par;
+                                          term->paser.pm[n] = term->paser.pm[n] * 10 + ch - '0'; 
+                                          return 1;}                                                            }
+        if (ch == ANSI_BELL ||
+            ch == ANSI_ST         ) { osc(term); reset_paser(term); return 1;                                   }
+        else if (term->paser.num_par == 1) { term->paser.pt[term->paser.pt_len++] = ch; return 1;               }
+    );
 
     reset_paser(term);
     return 0;
@@ -206,6 +237,8 @@ int term_write(term_t *term, const char *str) {
             term->cur_y = term->r - 1;
         }
     }
+
+    term->callback(REDRAW, NULL);
 
     return term->cur_y - y + 1;
 }

@@ -3,11 +3,11 @@
 
 #include <stdio.h>
 
+#define SDL_REDRAW (SDL_USEREVENT + REDRAW)
+#define SDL_SETTITLE (SDL_USEREVENT + SET_TITLE)
 
 #define MIN(a, b) (a > b? b : a)
 #define MAX(a, b) (a > b? a : b)
-
-#define SDL_REDRAW (SDL_USEREVENT + 1)
 
 #define RGBA_A(rgba) rgba & 0x000ff
 #define RGBA_B(rgba) (rgba >> 8) & 0x000ff
@@ -21,6 +21,7 @@
 #define ANSI_NEWLINE    '\x0a'
 #define ANSI_RETURN     '\x0d'
 #define ANSI_ESCAPE     '\x1b'
+#define ANSI_ST         '\x9c'
 
 // cursor control
 #define ANSI_UP         "\x1b[A"
