@@ -1,5 +1,6 @@
 // argument
-#define PARAMETER_NUM 8
+#define PM_NUM 8
+#define PT_LEN 128
 
 // appaerance
 #define TERM_COL 125
