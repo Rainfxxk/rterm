@@ -174,7 +174,7 @@ int main() {
     font_t font = open_font("./font.ttf");
 
     SDL_Window *win = (SDL_Window *)CHECK_PTR(
-        SDL_CreateWindow("rterm", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, font.w * TERM_COL, font.h * TERM_ROW, SDL_WINDOW_RESIZABLE ), // | SDL_WINDOW_BORDERLESS),
+        SDL_CreateWindow("rterm", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, font.w * TERM_COL, font.h * TERM_ROW, SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS),
         "Failed to create window: %s",
         SDL_GetError()
     );

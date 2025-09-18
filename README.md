@@ -19,8 +19,8 @@ Now, rterm support some color display experimentally, you can run command `expor
 
 ## TODO
 
-- 256 and true color support
-- ansi escape sequence for cursor control and other use
+- let rterm run successfully vim 
+- support the [xterm control sequences](https://www.xfree86.org/current/ctlseqs.html)
 
 ## Thanks
 
