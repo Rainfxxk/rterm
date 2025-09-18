@@ -19,7 +19,7 @@ Now, rterm support some color display experimentally, you can run command `expor
 
 ## TODO
 
-- let rterm run successfully vim 
+- let rterm run successfully vim (now we can seemingly start vim currectly, see [img](https://github.com/Rainfxxk/rterm/blob/main/img/vim.png))
 - support the [xterm control sequences](https://www.xfree86.org/current/ctlseqs.html)
 
 ## Thanks
