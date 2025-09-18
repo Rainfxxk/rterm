@@ -86,29 +86,32 @@ void set_color(term_t *term) {
 }
 
 void cursor_control(term_t *term, char func) {
-    int first = term->paser.pm[0] == 0? 0 : term->paser.pm[0];
-    int second = term->paser.pm[0] == 0? 0 : term->paser.pm[0];
+    int first = term->paser.pm[0] == 0? 1 : term->paser.pm[0];
+    int second = term->paser.pm[1] == 0? 1 : term->paser.pm[1];
+    printf("cursor %d %d\n", first, second);
+    printf("cursor position: %d %d\n", term->cur_y, term->cur_x);
     switch (func) {
-        CASE('A', term->cur_y = MIN(term->r - 1, term->cur_y + first););
-        CASE('B', term->cur_y = MAX(0,           term->cur_y - first););
-        CASE('C', term->cur_x = MAX(term->c - 1, term->cur_x + first););
+        CASE('A', term->cur_y = MIN(0,           term->cur_y - first););
+        CASE('B', term->cur_y = MAX(term->r - 1, term->cur_y + first););
+        CASE('C', term->cur_x = MIN(term->c - 1, term->cur_x + first););
         CASE('D', term->cur_x = MAX(0,           term->cur_x - first););
         CASE('E', term->cur_y = MAX(0,           term->cur_y - first););
         CASE('F', term->cur_y = MIN(term->r - 1, term->cur_y + first););
-        CASE('G', term->cur_y = MIN(term->r - 1,       MAX(0, first)););
-        CASE('H', term->cur_y = MIN(term->r - 1,      MAX(0, first));
-                  term->cur_x = MIN(term->c - 1,      MAX(0, second)););
+        CASE('G', term->cur_y = MIN(term->r - 1,   MAX(0, first - 1)););
+        CASE('H', term->cur_y = MIN(term->r - 1,   MAX(0, first - 1));
+                  term->cur_x = MIN(term->c - 1,  MAX(0, second - 1)););
     }
+    
 }
 
 void _erase_line(term_t *term, int r, int c, int func) {
     arg_t arg = {.bg = TERM_BACKGROUND, .fg = TERM_FOREGROUND};
-    tchar_t erase = {.ch = '\0', arg = arg};
+    tchar_t erase = {.ch = ' ', arg = arg};
 
     switch (func) {
-        CASE(0, for(int i = c; i < term->c; i++) term->screen[r][i] = erase);
-        CASE(1, for(int i = 0; i < c;       i++) term->screen[r][i] = erase);
-        CASE(2, for(int i = 0; i < term->c; i++) term->screen[r][i] = erase);
+        CASE(0, for(int i = c; i < term->c; i++) { term->screen[r][i] = erase;});
+        CASE(1, for(int i = 0; i < c;       i++) { term->screen[r][i] = erase;});
+        CASE(2, for(int i = 0; i < term->c; i++) { term->screen[r][i] = erase;});
     }
 }
 
@@ -159,7 +162,8 @@ int handle_ansi(term_t *term, const char ch) {
 
     NORMAL_STATE(
         if (ch == ANSI_BELL       ) { return 1;                                                                 }
-        if (ch == ANSI_BACKSPACE  ) { term->screen[term->cur_y][--term->cur_x].ch = '\0'; return 1;             }
+        if (ch == ANSI_BACKSPACE  ) { if (--term->cur_x < 0) { term->cur_y--; term->cur_x = term->c - 2;}
+                                      term->screen[term->cur_y][term->cur_x].ch = '\0'; return 1;               }
         if (ch == ANSI_NEWLINE    ) { if(!term->just_wraped) { term->cur_y++; term->just_wraped = 0; } return 1;}
         if (ch == ANSI_RETURN     ) { term->cur_x = 0; return 1;                                                }
         if (ch == ANSI_ESCAPE     ) { term->paser.state = ESCAPE; return 1;                                     }
@@ -170,6 +174,7 @@ int handle_ansi(term_t *term, const char ch) {
     );
     CSI_STATE(
         if (ch == ';'             ) { term->paser.num_par++; return 1;                                          }
+        if (ch >= '<' && ch <= '?') { term->paser.pm[term->paser.num_par++] = ch; return 1;                     }
         if (ch >= '0' && ch <= '9') { int n = term->paser.num_par;
                                       term->paser.pm[n] = term->paser.pm[n] * 10 + ch - '0'; 
                                       return 1;                                                                 }
@@ -181,6 +186,8 @@ int handle_ansi(term_t *term, const char ch) {
                                       erase_display(term);      reset_paser(term); return 1;                    }
         if (ch == 'K'             ) { term->paser.num_par++;
                                       erase_line(term);         reset_paser(term); return 1;                    }
+        if (ch == 'h'             ) { reset_paser(term); return 1;}
+        if (ch == 'l'             ) { reset_paser(term); return 1;}
     );
     OSC_STATE(
         if (ch == ';'             ) { term->paser.num_par++; return 1;                                          }
@@ -188,8 +195,8 @@ int handle_ansi(term_t *term, const char ch) {
                                           int n = term->paser.num_par;
                                           term->paser.pm[n] = term->paser.pm[n] * 10 + ch - '0'; 
                                           return 1;}                                                            }
-        if (ch == ANSI_BELL ||
-            ch == ANSI_ST         ) { osc(term); reset_paser(term); return 1;                                   }
+        if (ch == ANSI_BELL       ) { osc(term); reset_paser(term); return 1;                                   }
+        if (ch == ANSI_ST         ) { osc(term); reset_paser(term); return 1;                                   }
         else if (term->paser.num_par == 1) { term->paser.pt[term->paser.pt_len++] = ch; return 1;               }
     );
 
@@ -218,18 +225,32 @@ int term_write(term_t *term, const char *str) {
     int y = term->cur_y;
 
     for (int i = 0; i < len; i++) {
+        printf("(%d %d): ", term->cur_y, term->cur_x);
+        // printf("%c", *(str + i));
+        if (*(str + i) == '\x1b') {
+            printf("%\\x1b(%d)\n", *(str + i), *(str + i));
+        }
+        else {
+            printf("%c(%d)\n", *(str + i), *(str + i));
+        }
+        fflush(stdout);
         int res = handle_ansi(term, *(str + i));
         if ( res == 0) {
             term->screen[term->cur_y][term->cur_x].ch = *(str + i);
             term->screen[term->cur_y][term->cur_x++].arg = term->arg;
-            if (term->cur_x >= term->c) {
-                term->cur_x = 0;
-                term->cur_y++;
-                term->just_wraped = 1;
-            }
-            else {
-                term->just_wraped = 0;
-            }
+        }
+
+        if (term->cur_x >= term->c) {
+            term->cur_x = 0;
+            term->cur_y++;
+            term->just_wraped = 1;
+        }
+        else {
+            term->just_wraped = 0;
+        }
+        if (term->cur_x < 0) {
+            term->cur_y--;
+            term->cur_x = term->c - 2;
         }
 
         if (term->cur_y >= term->r) {
