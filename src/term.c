@@ -88,8 +88,8 @@ void set_color(term_t *term) {
 void cursor_control(term_t *term, char func) {
     int first = term->paser.pm[0] == 0? 1 : term->paser.pm[0];
     int second = term->paser.pm[1] == 0? 1 : term->paser.pm[1];
-    printf("cursor %d %d\n", first, second);
-    printf("cursor position: %d %d\n", term->cur_y, term->cur_x);
+    // printf("cursor %d %d\n", first, second);
+    // printf("cursor position: %d %d\n", term->cur_y, term->cur_x);
     switch (func) {
         CASE('A', term->cur_y = MIN(0,           term->cur_y - first););
         CASE('B', term->cur_y = MAX(term->r - 1, term->cur_y + first););
@@ -225,15 +225,15 @@ int term_write(term_t *term, const char *str) {
     int y = term->cur_y;
 
     for (int i = 0; i < len; i++) {
-        printf("(%d %d): ", term->cur_y, term->cur_x);
+        // printf("(%d %d): ", term->cur_y, term->cur_x);
         // printf("%c", *(str + i));
-        if (*(str + i) == '\x1b') {
-            printf("%\\x1b(%d)\n", *(str + i), *(str + i));
-        }
-        else {
-            printf("%c(%d)\n", *(str + i), *(str + i));
-        }
-        fflush(stdout);
+        // if (*(str + i) == '\x1b') {
+        //     printf("%\\x1b(%d)\n", *(str + i), *(str + i));
+        // }
+        // else {
+        //     printf("%c(%d)\n", *(str + i), *(str + i));
+        // }
+        // fflush(stdout);
         int res = handle_ansi(term, *(str + i));
         if ( res == 0) {
             term->screen[term->cur_y][term->cur_x].ch = *(str + i);
