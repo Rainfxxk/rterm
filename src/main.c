@@ -168,6 +168,11 @@ void *callback(int type, void *arg) {
     return NULL;
 }
 
+void conbination_key(SDL_Keysym keysym, term_t *term) {
+    if (keysym.sym) {
+    }
+}
+
 int main() {
     init();
 
@@ -211,12 +216,14 @@ int main() {
             CASE(SDL_KEYDOWN,   switch (event.key.keysym.sym) {
                     CASE(SDLK_BACKSPACE, str[0] = ANSI_BACKSPACE; WRITE_MASTER(str, 1));
                     CASE(SDLK_RETURN,    str[0] = ANSI_RETURN; WRITE_MASTER(str, 1));
-                    CASE(SDLK_ESCAPE,    str[0] = ANSI_ESCAPE; WRITE_MASTER(str, 1));
+                    CASE(SDLK_ESCAPE,    str[0] = ANSI_ESCAPE; WRITE_MASTER(str, 1););
                     CASE(SDLK_TAB,       str[0] = ANSI_TAB; WRITE_MASTER(str, 1));
                     CASE(SDLK_UP,        WRITE_MASTER(ANSI_UP, 3));
                     CASE(SDLK_RIGHT,     WRITE_MASTER(ANSI_RIGHT, 3));
                     CASE(SDLK_LEFT,      WRITE_MASTER(ANSI_LEFT, 3));
                     CASE(SDLK_DOWN,      WRITE_MASTER(ANSI_DOWN, 3));
+                    // CASE(SDLK_LCTRL,     str[0] = 3; WRITE_MASTER(str, 1););
+                    default: conbination_key(event.key.keysym, term);break;
                 }
             );
             CASE(SDL_TEXTINPUT, WRITE_MASTER(event.text.text, strlen(event.text.text)););
