@@ -37,8 +37,10 @@ typedef struct term_t {
     int cur_x, cur_y;
     int just_wraped;
     tchar_t **screen;
+    arg_t default_arg;
     arg_t arg;
     ansi_paser_t paser;
+    int scroll_top, scroll_bottom;
     void *(*callback)(int, void *);
 }term_t ;
 
