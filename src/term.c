@@ -39,7 +39,7 @@ term_t *get_term(int r, int c) {
         term->screen[j][term->c].ch = '\0';
     }
 
-    printf("term size: %ld", sizeof(term_t) + r * (c + 1) * sizeof(tchar_t));
+    // log("term size: %ld", sizeof(term_t) + r * (c + 1) * sizeof(tchar_t));
 
     term->default_arg.bg = TERM_BACKGROUND;
     term->default_arg.fg = TERM_FOREGROUND;
@@ -55,7 +55,7 @@ term_t *get_term(int r, int c) {
 }
 
 void clearline(term_t *term, int r) {
-    printf("clearline %d\n", r);
+    // log("clearline %d\n", r);
     for (int i = 0; i < term->c; i++) {
         term->screen[r][i].ch = ' ';
         term->screen[r][i].arg = term->default_arg;
@@ -220,7 +220,7 @@ void insert_line(term_t *term) {
 
     unsigned src = term->cur_y;
     unsigned dst = MIN(term->scroll_bottom, term->cur_y + n);
-    unsigned copy_n = term->scroll_bottom - term->cur_y + 1;
+    unsigned copy_n = term->scroll_bottom - src + 1;
 
     copy_lines(term, dst, src, copy_n);
     for (unsigned i = 0; i < n; i++) {
@@ -230,14 +230,19 @@ void insert_line(term_t *term) {
 }
 
 void delete_line(term_t *term) {
-    int n = term->paser.pm[0] <= 0? 1 : term->paser.pm[0];
-    n = MIN(n, term->r - term->cur_y);
-    for (int i = 0; i < n; i++) {
-        _erase_line(term, term->cur_y + i, term->cur_x, 2);
+    unsigned n = term->paser.pm[0] <= 0? 1 : term->paser.pm[0];
+    n = MIN(n, term->scroll_bottom - term->cur_y + 1);
+
+    unsigned src = term->cur_y + n;
+    unsigned dst = term->cur_y;
+    unsigned copy_n = term->scroll_bottom - src + 1;
+
+    copy_lines(term, dst, src, copy_n);
+    for (unsigned i = dst + copy_n; i <= term->scroll_bottom; i++) {
+        clearline(term, i);
     }
-    for (int i = term->cur_y + n; i < term->r; i++) {
-        memcpy(term->screen[i - 1], term->screen[i], term->c * sizeof(tchar_t));
-    }
+
+    term->cur_x = 0;
 }
 
 void delete_char(term_t *term) {
@@ -381,55 +386,31 @@ int term_write(term_t *term, const char *str) {
         if ( res == 0) {
             if (flag == 1) {
                 control_seq[index] = '\0';
-                for (int i = 0; i < index; i++) {
-                    if (*(str + i) == '\x1b') {
-                        printf("\\x1b", control_seq[i]);
-                    }
-                    else {
-                        printf("%c", control_seq[i]);
-                    }
-                }
-                printf("\n");
+                log("control_seq: %s", control_seq);
                 fflush(stdout);
                 index = 0;
                 flag = 0;
             }
-            printf("%c", *(str + i));
+            log("%c", *(str + i));
             term->screen[term->cur_y][term->cur_x].ch = *(str + i);
             term->screen[term->cur_y][term->cur_x++].arg = term->arg;
         }
         else {
             if (flag == 0) {
-                printf("\n");
                 flag = 1;
             }
             else if (flag == 1 && *(str + i) == '\x1b'){
-                control_seq[99] = '\0';
-                for (int i = 0; i < index; i++) {
-                    if (*(str + i) == '\x1b') {
-                        printf("\\x1b", control_seq[i]);
-                    }
-                    else {
-                        printf("%c", control_seq[i]);
-                    }
-                }
-                printf("\n");
+                control_seq[index] = '\0';
+                log("control_seq: %s", control_seq);
                 fflush(stdout);
                 index = 0;
                 flag = 0;
             }
-            control_seq[index++] = *(str + i);
+            if (*(str + i) == '\x1b') index = stpcpy(&control_seq[index], "\\x1b") - &control_seq[index];
+            else control_seq[index++] = *(str + i);
             if (index >= 100) {
                 control_seq[99] = '\0';
-                for (int i = 0; i < index; i++) {
-                    if (*(str + i) == '\x1b') {
-                        printf("\\x1b", control_seq[i]);
-                    }
-                    else {
-                        printf("%c", control_seq[i]);
-                    }
-                }
-                printf("\n");
+                log("control_seq: %s", control_seq);
                 fflush(stdout);
                 index = 0;
                 flag = 0;
@@ -450,7 +431,7 @@ int term_write(term_t *term, const char *str) {
         }
 
         if ((unsigned)term->cur_y > term->scroll_bottom) {
-            printf("scroll_up: %d\n", term->cur_y - term->scroll_bottom);
+            log("scroll_up: %d\n", term->cur_y - term->scroll_bottom);
             _scroll_up(term, term->cur_y - term->scroll_bottom);
             term->cur_y = term->scroll_bottom;
         }

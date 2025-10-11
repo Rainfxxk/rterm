@@ -9,9 +9,10 @@
 #include <termios.h>
 #include <unistd.h>
 #include "pty.h"
-#include "util.h"
 
 #define SHELL "/bin/bash"
+
+extern char **environ;
 
 
 int term_set_size(PTY *pty, int r, int c) {
@@ -78,8 +79,9 @@ PTY *open_pty(){
 
 int spawn(PTY *pty) {
     pid_t p;
-    char *env[] = { "TERM=xterm-256color", NULL };
+    // char *env[] = { "TERM=xterm-256color", NULL };
     // char *env[] = { "TERM=dumb", NULL };
+    char **env = environ;
 
     p = fork();
     if (p == 0)
