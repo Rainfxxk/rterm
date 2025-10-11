@@ -77,6 +77,9 @@ void draw_text(SDL_Renderer *renderer, const char *str, font_t *font, arg_t arg,
     );
 
     SDL_RenderCopy(renderer, texture, NULL, rect);
+
+    SDL_FreeSurface(text);
+    SDL_DestroyTexture(texture);
 }
 
 void draw_line(SDL_Renderer *renderer, tchar_t *line, font_t *font, int r, int c) {

@@ -40,7 +40,7 @@ typedef struct term_t {
     arg_t default_arg;
     arg_t arg;
     ansi_paser_t paser;
-    int scroll_top, scroll_bottom;
+    unsigned scroll_top, scroll_bottom;
     void *(*callback)(int, void *);
 }term_t ;
 

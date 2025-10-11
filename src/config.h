@@ -1,3 +1,6 @@
+#ifndef __CONFIG_H_
+#define __CONFIG_H_
+
 // argument
 #define PM_NUM 8
 #define PT_LEN 128
@@ -31,3 +34,5 @@
 #define TERM_BRIGHT_CYAN       0x56d4ddff
 #define TERM_BRIGHT_WHITE      0xcdd9e5ff
 // #define TERM_           0x      ff
+
+#endif
