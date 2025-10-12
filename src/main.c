@@ -21,9 +21,6 @@
 #include "util.h"
 
 
-term_t *term; 
-PTY *pty;
-
 #define BUFFER_SIZE 4096
 char buffer[BUFFER_SIZE + 1];
 
@@ -63,6 +60,13 @@ void close_font(font_t font) {
 }
 
 void draw_text(SDL_Renderer *renderer, const char *str, font_t *font, arg_t arg, SDL_Rect *rect) {
+    int len = strlen(str);
+
+    if (arg.reverse) SWAP(unsigned, arg.bg, arg.fg);
+
+    SDL_SetRenderDrawColor(renderer, RGBA(arg.bg));
+    SDL_RenderFillRect(renderer, rect);
+
     SDL_Color fg = {RGBA(arg.fg)};
 
     SDL_Surface *text = (SDL_Surface *)CHECK_PTR(
@@ -83,22 +87,33 @@ void draw_text(SDL_Renderer *renderer, const char *str, font_t *font, arg_t arg,
 }
 
 void draw_line(SDL_Renderer *renderer, tchar_t *line, font_t *font, int r, int c) {
-    if (line[0].ch == '\0') return;
     arg_t arg = line[0].arg;
     char buf[c + 1];
     char *ptr = buf;
-    for (int i = 0; i < c + 1; i++) {
+    int i = 0;
+    SDL_Rect rect = {.y = r * font->h, .h = font->h};
+
+    if (line[0].ch != '\0') for (; i < c + 1; i++) {
         buf[i] = line[i].ch;
         if (line[i].ch == '\0' || memcmp(&line[i].arg, &arg, sizeof(arg_t)) != 0) {
             buf[i] = '\0';
-            SDL_Rect rect = {.x = (ptr - buf) * font->w, .y = r * font->h, .w = (i - (ptr - buf)) * font->w, .h = font->h};
+            rect.x = (ptr - buf) * font->w;
+            rect.w = (i - (ptr - buf)) * font->w;
             draw_text(renderer, ptr, font, arg, &rect);
             ptr = buf + i;
             arg = line[i].arg;
-            if (line[i].ch == '\0') return;
+            if (line[i].ch == '\0') {
+                break;
+            }
             buf[i] = line[i].ch;
         }
     }
+
+    rect.x = i * font->w;
+    rect.w = (c - i + 1) * font->w;
+    log("r: %d i: %d x: %d w %d", r, i, rect.x, rect.w);
+    SDL_RenderFillRect(renderer, &rect);
+    return;
 }
 
 void draw_cursor(SDL_Renderer *renderer, term_t *term, font_t *font) {

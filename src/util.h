@@ -10,11 +10,14 @@
 #define MIN(a, b) (a > b? b : a)
 #define MAX(a, b) (a > b? a : b)
 
+#define SWAP(type, a, b) {type temp = a; a = b; b = temp;}
+
 #define RGBA_A(rgba) rgba & 0x000ff
 #define RGBA_B(rgba) (rgba >> 8) & 0x000ff
 #define RGBA_G(rgba) (rgba >> 16) & 0x000ff
 #define RGBA_R(rgba) (rgba >> 24) & 0x000ff
-#define RGBA(rgba) RGBA_R(rgba), RGBA_G(rgba), RGBA_B(rgba), RGBA_A(rgba)
+#define RGBA(rgba)   RGBA_R(rgba), RGBA_G(rgba), RGBA_B(rgba), RGBA_A(rgba)
+#define RGB(r, g, b) (r << 24 | g << 16 | b << 8 | 0xff)
 
 #define ANSI_BELL       '\x07'
 #define ANSI_BACKSPACE  '\x08'

@@ -5,6 +5,7 @@
 
 typedef struct arg_t {
     unsigned fg, bg;
+    unsigned char reverse;
 } arg_t;
 
 typedef struct tchar_t {

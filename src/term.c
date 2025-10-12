@@ -33,7 +33,7 @@ term_t *get_term(int r, int c) {
         *(term->screen + j) = (tchar_t *)CHECK_PTR(malloc((c + 1) * sizeof(tchar_t)), "no memory for malloc screen");
         // memset(term->screen[i], '\0', (c + 1) * sizeof(tchar_t));
         for (int i = 0; i < c; i++) {
-            term->screen[j][i].ch = ' ';
+            term->screen[j][i].ch = '\0';
             term->screen[j][i].arg = term->arg;
         }
         term->screen[j][term->c].ch = '\0';
@@ -43,6 +43,7 @@ term_t *get_term(int r, int c) {
 
     term->default_arg.bg = TERM_BACKGROUND;
     term->default_arg.fg = TERM_FOREGROUND;
+    term->default_arg.reverse = 0;
     term->arg = term->default_arg;
     reset_paser(term);
 
@@ -112,12 +113,17 @@ void _scroll_down(term_t *term, unsigned int n) {
 
 void set_color(term_t *term) {
     term->paser.num_par++;
+
+    arg_t temp_arg;
+
     if (term->paser.num_par == 0) {
         term->arg = term->default_arg;
     }
+
     else for(unsigned i = 0; i < term->paser.num_par; i++) {
         unsigned par = term->paser.pm[i];
-        if (par == 00) term->arg = term->default_arg; 
+        if (par == 00) term->arg    = term->default_arg; 
+        if (par == 07) term->arg.reverse = 1;
         if (par == 30) term->arg.fg = TERM_BLACK;
         if (par == 31) term->arg.fg = TERM_RED;
         if (par == 32) term->arg.fg = TERM_GREEN;
@@ -126,6 +132,11 @@ void set_color(term_t *term) {
         if (par == 35) term->arg.fg = TERM_MAGENTA;
         if (par == 36) term->arg.fg = TERM_CYAN;
         if (par == 37) term->arg.fg = TERM_WHITE;
+        if (par == 38) if (term->paser.pm[++i] == 2) { 
+                       term->arg.fg = RGB(term->paser.pm[++i],
+                                          term->paser.pm[++i],
+                                          term->paser.pm[++i]);
+                       log("fg rgba: %d %d %d %d", RGBA(term->arg.fg));}
         if (par == 39) term->arg.fg = TERM_FOREGROUND;
         if (par == 40) term->arg.bg = TERM_BLACK;
         if (par == 41) term->arg.bg = TERM_RED;
@@ -135,7 +146,12 @@ void set_color(term_t *term) {
         if (par == 45) term->arg.bg = TERM_MAGENTA;
         if (par == 46) term->arg.bg = TERM_CYAN;
         if (par == 47) term->arg.bg = TERM_WHITE;
-        if (par == 49) term->arg.bg = TERM_FOREGROUND;
+        if (par == 48) if (term->paser.pm[++i] == 2) {
+                       term->arg.bg = RGB(term->paser.pm[++i],
+                                          term->paser.pm[++i],
+                                          term->paser.pm[++i]);
+                       log("bg rgba: %d %d %d %d", RGBA(term->arg.bg));}
+        if (par == 49) term->arg.bg = TERM_BACKGROUND;
     }
 }
 
@@ -167,7 +183,8 @@ void erase_char(term_t *term) {
 }
 
 void _erase_line(term_t *term, int r, int c, int func) {
-    tchar_t erase = {.ch = ' ', .arg = term->default_arg};
+    log("fg: %08x, bg: %08x", term->arg.fg, term->arg.bg);
+    tchar_t erase = {.ch = '\0', .arg = term->arg};
 
     switch (func) {
         CASE(0, for(int i = c; i < term->c; i++) { term->screen[r][i] = erase;});
