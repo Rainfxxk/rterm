@@ -6,6 +6,11 @@
 #include "term.h"
 #include "util.h"
 
+char control_seq[100];
+int idx;
+int flag;
+
+
 void *_callback(int, void *) {
     return NULL;
 }
@@ -114,12 +119,9 @@ void _scroll_down(term_t *term, unsigned int n) {
 void set_color(term_t *term) {
     term->paser.num_par++;
 
-    arg_t temp_arg;
-
     if (term->paser.num_par == 0) {
         term->arg = term->default_arg;
     }
-
     else for(unsigned i = 0; i < term->paser.num_par; i++) {
         unsigned par = term->paser.pm[i];
         if (par == 00) term->arg    = term->default_arg; 
@@ -132,11 +134,12 @@ void set_color(term_t *term) {
         if (par == 35) term->arg.fg = TERM_MAGENTA;
         if (par == 36) term->arg.fg = TERM_CYAN;
         if (par == 37) term->arg.fg = TERM_WHITE;
-        if (par == 38) if (term->paser.pm[++i] == 2) { 
-                       term->arg.fg = RGB(term->paser.pm[++i],
-                                          term->paser.pm[++i],
-                                          term->paser.pm[++i]);
-                       log("fg rgba: %d %d %d %d", RGBA(term->arg.fg));}
+        if (par == 38) if (term->paser.pm[i + 1] == 2) { 
+                       term->arg.fg = RGB(term->paser.pm[i + 2],
+                                          term->paser.pm[i + 3],
+                                          term->paser.pm[i + 4]);
+                       i += 4;}
+                       // log("fg rgba: %d %d %d %d", RGBA(term->arg.fg));}
         if (par == 39) term->arg.fg = TERM_FOREGROUND;
         if (par == 40) term->arg.bg = TERM_BLACK;
         if (par == 41) term->arg.bg = TERM_RED;
@@ -146,11 +149,12 @@ void set_color(term_t *term) {
         if (par == 45) term->arg.bg = TERM_MAGENTA;
         if (par == 46) term->arg.bg = TERM_CYAN;
         if (par == 47) term->arg.bg = TERM_WHITE;
-        if (par == 48) if (term->paser.pm[++i] == 2) {
-                       term->arg.bg = RGB(term->paser.pm[++i],
-                                          term->paser.pm[++i],
-                                          term->paser.pm[++i]);
-                       log("bg rgba: %d %d %d %d", RGBA(term->arg.bg));}
+        if (par == 48) if (term->paser.pm[i + 1] == 2) { 
+                       term->arg.bg = RGB(term->paser.pm[i + 2],
+                                          term->paser.pm[i + 3],
+                                          term->paser.pm[i + 4]);
+                       i += 4;}
+                       // log("bg rgba: %d %d %d %d", RGBA(term->arg.bg));}
         if (par == 49) term->arg.bg = TERM_BACKGROUND;
     }
 }
@@ -183,8 +187,8 @@ void erase_char(term_t *term) {
 }
 
 void _erase_line(term_t *term, int r, int c, int func) {
-    log("fg: %08x, bg: %08x", term->arg.fg, term->arg.bg);
-    tchar_t erase = {.ch = '\0', .arg = term->arg};
+    // log("fg: %08x, bg: %08x", term->arg.fg, term->arg.bg);
+    tchar_t erase = {.ch = ' ', .arg = term->arg};
 
     switch (func) {
         CASE(0, for(int i = c; i < term->c; i++) { term->screen[r][i] = erase;});
@@ -373,7 +377,7 @@ int handle_ansi(term_t *term, const char ch) {
         if (ch == 'l'             ) { reset_paser(term); return 1;}
         if (ch == 'm'             ) { set_color(term); reset_paser(term); return 1;                     }
         if (ch == 'r'             ) { scroll_region(term); reset_paser(term); return 1;                 }
-        if (ch >= 'a' && ch <= 'z') {reset_paser(term); return 1;}
+        else {reset_paser(term); return 1;}
     );
     OSC_STATE(
         if (ch == ';'             ) { term->paser.num_par++; return 1;                                  }
@@ -390,46 +394,38 @@ int handle_ansi(term_t *term, const char ch) {
     return 0;
 }
 
-int term_write(term_t *term, const char *str) {
-    int len = strlen(str);
-    int y = term->cur_y;
-
-    char control_seq[100];
-    char index = 0;
-    int flag = 0;
-
-    for (int i = 0; i < len; i++) {
-        int res = handle_ansi(term, *(str + i));
+void term_write_ch(term_t *term, const char ch) {
+        int res = handle_ansi(term, ch);
         if ( res == 0) {
             if (flag == 1) {
-                control_seq[index] = '\0';
-                log("control_seq: %s", control_seq);
+                control_seq[idx] = '\0';
+                term_log("control_seq: %s\n", control_seq);
                 fflush(stdout);
-                index = 0;
+                idx = 0;
                 flag = 0;
             }
-            log("%c", *(str + i));
-            term->screen[term->cur_y][term->cur_x].ch = *(str + i);
+            term_log("term_write: %c\n", ch);
+            term->screen[term->cur_y][term->cur_x].ch = ch;
             term->screen[term->cur_y][term->cur_x++].arg = term->arg;
         }
         else {
             if (flag == 0) {
                 flag = 1;
             }
-            else if (flag == 1 && *(str + i) == '\x1b'){
-                control_seq[index] = '\0';
-                log("control_seq: %s", control_seq);
+            else if (flag == 1 && ch == '\x1b'){
+                control_seq[idx] = '\0';
+                term_log("control_seq: %s\n", control_seq);
                 fflush(stdout);
-                index = 0;
+                idx = 0;
                 flag = 0;
             }
-            if (*(str + i) == '\x1b') index = stpcpy(&control_seq[index], "\\x1b") - &control_seq[index];
-            else control_seq[index++] = *(str + i);
-            if (index >= 100) {
+            if (ch == '\x1b') idx = stpcpy(&control_seq[idx], "\\x1b") - &control_seq[idx];
+            else control_seq[idx++] = ch;
+            if (idx >= 100) {
                 control_seq[99] = '\0';
-                log("control_seq: %s", control_seq);
+                term_log("control_seq: %s\n", control_seq);
                 fflush(stdout);
-                index = 0;
+                idx = 0;
                 flag = 0;
             }
         }
@@ -448,10 +444,18 @@ int term_write(term_t *term, const char *str) {
         }
 
         if ((unsigned)term->cur_y > term->scroll_bottom) {
-            log("scroll_up: %d\n", term->cur_y - term->scroll_bottom);
+            // log("scroll_up: %d\n", term->cur_y - term->scroll_bottom);
             _scroll_up(term, term->cur_y - term->scroll_bottom);
             term->cur_y = term->scroll_bottom;
         }
+}
+
+int term_write(term_t *term, const char *str) {
+    int len = strlen(str);
+    int y = term->cur_y;
+
+    for (int i = 0; i < len; i++) {
+        term_write_ch(term, *(str + i));
     }
 
     term->callback(REDRAW, NULL);

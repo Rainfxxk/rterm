@@ -1,2 +1,5 @@
 build/
 test/
+log*
+src/*.d
+src/*.o

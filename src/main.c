@@ -36,6 +36,7 @@ void init() {
         SDL_GetError()
     );
     CHECK(TTF_Init(), "Failed to init sdl ttf: %s", SDL_GetError());
+    log_init("log");
 }
 
 font_t open_font(char *font_file) {
@@ -109,21 +110,39 @@ void draw_line(SDL_Renderer *renderer, tchar_t *line, font_t *font, int r, int c
         }
     }
 
-    rect.x = i * font->w;
-    rect.w = (c - i + 1) * font->w;
-    log("r: %d i: %d x: %d w %d", r, i, rect.x, rect.w);
-    SDL_RenderFillRect(renderer, &rect);
+    // rect.x = i * font->w;
+    // rect.w = (c - i + 1) * font->w;
+    // log("r: %d i: %d x: %d w %d", r, i, rect.x, rect.w);
+    // SDL_RenderFillRect(renderer, &rect);
     return;
 }
 
 void draw_cursor(SDL_Renderer *renderer, term_t *term, font_t *font) {
     SDL_Rect cursor_rect = {.x = term->cur_x * font->w, .y = term->cur_y * font->h, .w = font->w, .h = font->h};
     SDL_SetRenderDrawColor(renderer, RGBA(TERM_CURSOR_BG));
-    if (term->screen[term->cur_y][term->cur_x].ch != '\0') {
-        char ch[2] = {term->screen[term->cur_y][term->cur_x].ch, '\0'};
-        draw_text(renderer, ch, font, term->arg, &cursor_rect);
-    }
     SDL_RenderFillRect(renderer, &cursor_rect);
+    if (term->screen[term->cur_y][term->cur_x].ch != '\0' && term->screen[term->cur_y][term->cur_x].ch != ' ') {
+        char ch[2] = {term->screen[term->cur_y][term->cur_x].ch, '\0'};
+
+        SDL_Color fg = {RGBA(TERM_CURSOR_FG)};
+
+        SDL_Surface *text = (SDL_Surface *)CHECK_PTR(
+            TTF_RenderText_Blended(font->ttf, ch, fg),
+            "Failed to render text: %s",
+            SDL_GetError()
+        );
+
+        SDL_Texture *texture = (SDL_Texture *)CHECK_PTR(SDL_CreateTextureFromSurface(renderer, text),
+            "Failed to create texture from surface: %s",
+            SDL_GetError()
+        );
+
+        SDL_RenderCopy(renderer, texture, NULL, &cursor_rect);
+
+        SDL_FreeSurface(text);
+        SDL_DestroyTexture(texture);
+    }
+    term_log("draw_cursor: %d, %d\n", term->cur_y, term->cur_x);
 }
 
 void draw_term(SDL_Renderer *renderer, term_t *term, font_t *font) {
@@ -186,8 +205,17 @@ void *callback(int type, void *arg) {
     return NULL;
 }
 
-void conbination_key(SDL_Keysym keysym, term_t *term) {
-    if (keysym.sym) {
+void conbination_key(SDL_Keysym keysym, term_t *term, PTY *pty) {
+    char str[3];
+    int len = 0;
+    if (keysym.sym == 1073742048) return;
+    if (keysym.mod & KMOD_CTRL) {
+        printf("conbination_key: ctrl + %d\n", keysym.sym);
+        if (keysym.sym == 64)                    str[0] = 0;
+        if (keysym.sym > 90 && keysym.sym < 96)  str[0] = keysym.sym - 64;
+        if (keysym.sym > 96 && keysym.sym < 123) str[0] = keysym.sym - 96;
+        str[1] = '\0';
+        write(pty->master, str, 2);
     }
 }
 
@@ -240,8 +268,7 @@ int main() {
                     CASE(SDLK_RIGHT,     WRITE_MASTER(ANSI_RIGHT, 3));
                     CASE(SDLK_LEFT,      WRITE_MASTER(ANSI_LEFT, 3));
                     CASE(SDLK_DOWN,      WRITE_MASTER(ANSI_DOWN, 3));
-                    // CASE(SDLK_LCTRL,     str[0] = 3; WRITE_MASTER(str, 1););
-                    default: conbination_key(event.key.keysym, term);break;
+                    default: conbination_key(event.key.keysym, term, pty);break;
                 }
             );
             CASE(SDL_TEXTINPUT, WRITE_MASTER(event.text.text, strlen(event.text.text)););

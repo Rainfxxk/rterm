@@ -77,7 +77,7 @@
 
 
 #define log(format, ...) \
-    // printf(ANSI_FMT("[%s:%d %s] " format "\n", ANSI_FG_BLUE), __FILE__, __LINE__, __func__, ## __VA_ARGS__);
+    printf(ANSI_FMT("[%s:%d %s] " format "\n", ANSI_FG_BLUE), __FILE__, __LINE__, __func__, ## __VA_ARGS__);
 
 #define Assert(cond, format, ...) \
   do { \
@@ -88,5 +88,9 @@
   } while (0)
 
 #define panic(format, ...) Assert(0, format, ## __VA_ARGS__)
+
+void log_init(const char *log_file);
+void term_log(const char *format, ...);
+void log_close();
 
 #endif // !__UTIL_H__

@@ -46,6 +46,7 @@ typedef struct term_t {
 }term_t ;
 
 term_t *get_term(int r, int c);
+void term_write_ch(term_t *term, const char ch);
 int term_write(term_t *term, const char *str);
 
 

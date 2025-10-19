@@ -16,7 +16,7 @@
 #define TERM_BACKGROUND 	   0x22272eff
 #define TERM_FOREGROUND 	   0xadbac7ff
 #define TERM_CURSOR_BG         0x539bf5ff
-#define TERM_CURSOR_FG         0xadbac7ff
+#define TERM_CURSOR_FG         0x22272eff
 #define TERM_BLACK      	   0x545d68ff
 #define TERM_RED        	   0xf47067ff
 #define TERM_GREEN      	   0x57ab5aff

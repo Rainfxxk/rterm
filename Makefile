@@ -3,24 +3,29 @@ CFLAGS 	:= -Wall -Wextra -g
 LFLAGS	:= -lSDL2 -lSDL2_ttf
 
 SRC_DIR := ./src
-OBJ_DIR := ./build
+TARGET  := ./build/rterm
+TARGET_DIR  := ./build/rterm
 SRCS 	:= $(wildcard $(SRC_DIR)/*.c)
-OBJS 	:= $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
+OBJS 	:= $(patsubst %.c,%.o,$(SRCS))
+OBJ_D   := $(patsubst %.c,%.d,$(SRCS))
 
-all: $(OBJ_DIR)/rterm
+all: $(TARGET)
 	./$^
 
 $(OBJ_DIR):
 	mkdir $(OBJ_DIR)
 
-$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) 
-	$(CC) $(CFLAGS) $^ -c -o $@
+$(OBJS):%.o:%.c
+	$(CC) $(CFLAGS) -MM -MT $@ -MF $(patsubst %.o, %.d, $@) $<
+	$(CC) $(CFLAGS) -c -o $@ $<
 
+-include $(OBJS_D)
 
-$(OBJ_DIR)/rterm: $(OBJS)
+$(TARGET): $(OBJS)
 	$(CC) $^ -o $@ $(LFLAGS)
 
 clean:
-	rm -rf $(OBJ_DIR)
+	rm $(OBJS) $(OBJ_D)
+	rm -rf $(TARGET_DIR)
 
 .PHONY: clean
