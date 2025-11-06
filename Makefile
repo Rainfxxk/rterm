@@ -24,8 +24,11 @@ $(OBJS):%.o:%.c
 $(TARGET): $(OBJS)
 	$(CC) $^ -o $@ $(LFLAGS)
 
+gdb: $(TARGET)
+	gdb $(TARGET)
+
 clean:
 	rm $(OBJS) $(OBJ_D)
 	rm -rf $(TARGET_DIR)
 
-.PHONY: clean
+.PHONY: clean gdb

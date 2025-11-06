@@ -15,7 +15,7 @@
 extern char **environ;
 
 
-int term_set_size(PTY *pty, int r, int c) {
+int pty_set_size(pty_t *pty, int r, int c) {
     struct winsize ws = {
         .ws_col = c,
         .ws_row = r,
@@ -30,8 +30,7 @@ int term_set_size(PTY *pty, int r, int c) {
     return 0;
 }
 
-PTY *open_pty(){
-    PTY *pty = (PTY *)malloc(sizeof(PTY));
+pty_t *open_pty(pty_t *pty){
     char *slave_name;
 
     pty->master = posix_openpt(O_RDWR | O_NOCTTY);
@@ -77,7 +76,7 @@ PTY *open_pty(){
 }
 
 
-int spawn(PTY *pty) {
+int spawn(pty_t *pty) {
     pid_t p;
     // char *env[] = { "TERM=xterm-256color", NULL };
     // char *env[] = { "TERM=dumb", NULL };

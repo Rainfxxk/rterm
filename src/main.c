@@ -1,4 +1,3 @@
-#include <SDL2/SDL_timer.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
@@ -62,6 +61,7 @@ void close_font(font_t font) {
 
 void draw_text(SDL_Renderer *renderer, const char *str, font_t *font, arg_t arg, SDL_Rect *rect) {
     int len = strlen(str);
+    if (len <= 0) return;
 
     if (arg.reverse) SWAP(unsigned, arg.bg, arg.fg);
 
@@ -87,42 +87,55 @@ void draw_text(SDL_Renderer *renderer, const char *str, font_t *font, arg_t arg,
     SDL_DestroyTexture(texture);
 }
 
-void draw_line(SDL_Renderer *renderer, tchar_t *line, font_t *font, int r, int c) {
-    arg_t arg = line[0].arg;
+void draw_line(SDL_Renderer *renderer, tline_t *line, font_t *font, int r, int c) {
+    arg_t arg = line->str[0].arg;
     char buf[c + 1];
+    memset(buf, '\0', c + 1);
     char *ptr = buf;
     int i = 0;
     SDL_Rect rect = {.y = r * font->h, .h = font->h};
 
-    if (line[0].ch != '\0') for (; i < c + 1; i++) {
-        buf[i] = line[i].ch;
-        if (line[i].ch == '\0' || memcmp(&line[i].arg, &arg, sizeof(arg_t)) != 0) {
-            buf[i] = '\0';
-            rect.x = (ptr - buf) * font->w;
-            rect.w = (i - (ptr - buf)) * font->w;
-            draw_text(renderer, ptr, font, arg, &rect);
-            ptr = buf + i;
-            arg = line[i].arg;
-            if (line[i].ch == '\0') {
-                break;
-            }
-            buf[i] = line[i].ch;
+    while (i < c) {              // traverse the entire line
+
+        while (line->str[i].ch == '\0' && i < c) { // skip ‘\0' character
+            i++;
+            continue;
         }
+        ptr = buf + i;
+        arg = line->str[i].arg;
+
+        // get characters with same argument
+        while (line->str[i].ch != '\0' && memcmp(&line->str[i].arg, &arg, sizeof(arg_t)) == 0 && i < c) {
+            // printf("%c\n", buf[i]);
+            buf[i] = line->str[i].ch;
+            i++;
+        }
+
+        if (i > c) break;
+
+        // draw the text
+        buf[i] = '\0';
+        rect.x = (ptr - buf) * font->w;
+        rect.w = (i - (ptr - buf)) * font->w;
+        draw_text(renderer, ptr, font, arg, &rect);
     }
 
-    // rect.x = i * font->w;
-    // rect.w = (c - i + 1) * font->w;
-    // log("r: %d i: %d x: %d w %d", r, i, rect.x, rect.w);
-    // SDL_RenderFillRect(renderer, &rect);
     return;
 }
 
 void draw_cursor(SDL_Renderer *renderer, term_t *term, font_t *font) {
-    SDL_Rect cursor_rect = {.x = term->cur_x * font->w, .y = term->cur_y * font->h, .w = font->w, .h = font->h};
+    SDL_Rect cursor_rect = {
+        .x = term->cur_x * font->w,
+        .y = term->cur_y * font->h,
+        .w = font->w,
+        .h = font->h
+    };
+
     SDL_SetRenderDrawColor(renderer, RGBA(TERM_CURSOR_BG));
     SDL_RenderFillRect(renderer, &cursor_rect);
-    if (term->screen[term->cur_y][term->cur_x].ch != '\0' && term->screen[term->cur_y][term->cur_x].ch != ' ') {
-        char ch[2] = {term->screen[term->cur_y][term->cur_x].ch, '\0'};
+
+    if (term->screen[term->cur_y].str[term->cur_x].ch != '\0' && term->screen[term->cur_y].str[term->cur_x].ch != ' ') {
+        char ch[2] = {term->screen[term->cur_y].str[term->cur_x].ch, '\0'};
 
         SDL_Color fg = {RGBA(TERM_CURSOR_FG)};
 
@@ -146,27 +159,25 @@ void draw_cursor(SDL_Renderer *renderer, term_t *term, font_t *font) {
 }
 
 void draw_term(SDL_Renderer *renderer, term_t *term, font_t *font) {
+    pthread_mutex_lock(&term->mutex);
     SDL_Color term_bg = {RGBA(TERM_BACKGROUND)};
     SDL_SetRenderDrawColor(renderer, term_bg.r, term_bg.g, term_bg.b, term_bg.a);
     SDL_RenderClear(renderer);
 
     for (int j = 0; j < term->r; j++) {
-        draw_line(renderer, term->screen[j], font, j, term->c);
+        draw_line(renderer, term->screen + j, font, j, term->c);
     }
 
     draw_cursor(renderer, term, font);
     SDL_RenderPresent(renderer);
+    pthread_mutex_unlock(&term->mutex);
 }
 
-struct run_term_arg_t {
-    PTY *pty;
-    term_t *term;
-};
 
 void *run_term(void *arg) {
     struct run_term_arg_t *run_term_arg = (struct run_term_arg_t *)CHECK_PTR(arg, "run_term get a NULL"); 
-    PTY *pty = run_term_arg->pty;
-    term_t *term = run_term_arg->term;
+    term_t *term = (term_t *)CHECK_PTR(arg, "term thread get a NULL argument");
+    pty_t *pty = &term->pty;
     int maxfd = pty->master;
     fd_set readable;
     FD_ZERO(&readable);
@@ -205,7 +216,32 @@ void *callback(int type, void *arg) {
     return NULL;
 }
 
-void conbination_key(SDL_Keysym keysym, term_t *term, PTY *pty) {
+int resize_num = 0;
+
+void window_handle(SDL_WindowEvent window, SDL_Renderer *renderer, term_t *term, font_t *font) {
+    printf("window event:%d\n", window.event);
+    switch (window.event) {
+        case SDL_WINDOWEVENT_EXPOSED:
+            printf("exposed\n");
+            break;
+        case SDL_WINDOWEVENT_RESIZED:
+        // case SDL_WINDOWEVENT_SIZE_CHANGED:
+            int w = window.data1, h = window.data2;
+            int r = MAX(1, h / font->h);
+            int c = MAX(1, w / font->w);
+            if (r != term->r || c != term->c) {
+                printf("window resized %d: %d %d, %d %d\n", ++resize_num, h, w, r, c);
+                term_resize(term, r, c);
+            }
+            else {
+                draw_term(renderer, term, font);
+            }
+            break;
+    }
+
+}
+
+void conbination_key(SDL_Keysym keysym, term_t *term) {
     char str[3];
     int len = 0;
     if (keysym.sym == 1073742048) return;
@@ -215,7 +251,7 @@ void conbination_key(SDL_Keysym keysym, term_t *term, PTY *pty) {
         if (keysym.sym > 90 && keysym.sym < 96)  str[0] = keysym.sym - 64;
         if (keysym.sym > 96 && keysym.sym < 123) str[0] = keysym.sym - 96;
         str[1] = '\0';
-        write(pty->master, str, 2);
+        write(term->pty.master, str, 2);
     }
 }
 
@@ -225,7 +261,7 @@ int main() {
     font_t font = open_font("./font.ttf");
 
     SDL_Window *win = (SDL_Window *)CHECK_PTR(
-        SDL_CreateWindow("rterm", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, font.w * TERM_COL, font.h * TERM_ROW, SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS),
+        SDL_CreateWindow("rterm", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, font.w * TERM_COL, font.h * TERM_ROW, SDL_WINDOW_RESIZABLE), // | SDL_WINDOW_BORDERLESS),
         "Failed to create window: %s",
         SDL_GetError()
     );
@@ -242,20 +278,16 @@ int main() {
 
     term_t *term = get_term(TERM_ROW, TERM_COL); 
     term->callback = callback;
-    PTY *pty = open_pty();
-    term_set_size(pty, TERM_ROW, TERM_COL);
-    spawn(pty);
 
     pthread_t term_thread;
-    struct run_term_arg_t arg = {.pty = pty, .term = term};
-    CHECK(pthread_create(&term_thread, NULL, run_term, &arg), "Failed to create term thread");
+    CHECK(pthread_create(&term_thread, NULL, run_term, term), "Failed to create term thread");
 
     int running = 1;
     SDL_Event event;
     SDL_StartTextInput();
     while (running) {
         SDL_WaitEvent(&event);
-        #define WRITE_MASTER(str, len) {write(pty->master, str, len);}
+        #define WRITE_MASTER(str, len) {write(term->pty.master, str, len);}
         char str[2] = {'\0', '\0'};
         switch (event.type) {
             CASE(SDL_QUIT,      running = 0);
@@ -268,11 +300,12 @@ int main() {
                     CASE(SDLK_RIGHT,     WRITE_MASTER(ANSI_RIGHT, 3));
                     CASE(SDLK_LEFT,      WRITE_MASTER(ANSI_LEFT, 3));
                     CASE(SDLK_DOWN,      WRITE_MASTER(ANSI_DOWN, 3));
-                    default: conbination_key(event.key.keysym, term, pty);break;
+                    default: conbination_key(event.key.keysym, term);break;
                 }
             );
             CASE(SDL_TEXTINPUT, WRITE_MASTER(event.text.text, strlen(event.text.text)););
             CASE(SDL_REDRAW, draw_term(renderer, term, &font););
+            CASE(SDL_WINDOWEVENT, window_handle(event.window, renderer, term, &font););
             CASE(SDL_SETTITLE, SDL_SetWindowTitle(win, (const char *)event.user.data1); free(event.user.data1));
         }
     }

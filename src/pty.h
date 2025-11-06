@@ -1,17 +1,15 @@
 #ifndef __PTY_H__
-#define __PTY_Y__
+#define __PTY_H__
 
-typedef struct PTY PTY;
 
-struct PTY
-{
+typedef struct pty_t {
     int master, slave;
-};
+} pty_t;
 
 
-PTY *open_pty();
-int term_set_size(PTY *pty, int r, int c);
-int spawn(PTY *pty);
+pty_t *open_pty(pty_t *pty);
+int pty_set_size(pty_t *pty, int r, int c);
+int spawn(pty_t *pty);
 
 
 #endif // !__PTY_H__

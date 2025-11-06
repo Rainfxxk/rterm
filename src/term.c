@@ -1,9 +1,11 @@
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include "config.h"
 #include "term.h"
+#include "pty.h"
 #include "util.h"
 
 char control_seq[100];
@@ -24,24 +26,103 @@ void reset_paser(term_t *term) {
     term->paser.state = NORMAL;
 }
 
+void term_resize(term_t *term, int r, int c) {
+    pthread_mutex_lock(&term->mutex);
+
+    term_log("term_resize: %d %d\n", r, c);
+
+    tline_t *tmp = term->screen;
+    term->screen = (tline_t *)CHECK_PTR(malloc(r * sizeof(tline_t)), "no memory for malloc screen");
+
+    int old_r = term->r;
+    int old_c = term->c;
+    term->r = r;
+    term->scroll_bottom = r - 1;
+    term->c = c;
+    int cur_x = 0;
+    int cur_y = 0;
+    int x = 0;
+    int y = 0;
+
+    for (int j = 0; j < r; j++) {
+        term->screen[j].is_wraped = 0;
+        term->screen[j].str = (tchar_t *)CHECK_PTR(malloc((c + 1) * sizeof(tchar_t)), "no memory for malloc screen");
+        for (int i = 0; i < c + 1; i++) {
+            term->screen[j].str[i].ch = '\0';
+            term->screen[j].str[i].arg = term->default_arg;
+        }
+    }
+
+    while (y <= term->cur_y) {
+        if (y == term->cur_y && x >= term->cur_x) {
+            term->cur_x = cur_x;
+            term->cur_y = cur_y;
+            break;
+        }
+
+        int is_newline = (x >= old_c && !tmp[y].is_wraped) ||
+                         (x < old_c  && tmp[y].str[x].ch == '\0');
+
+        if (is_newline || cur_x >= c) {
+            if (!is_newline && cur_x >= c) {
+                printf("term_size is is_wraped\n");
+                term->screen[cur_y].is_wraped = 1;
+            }
+            cur_x =0;
+            cur_y++;
+
+            if (cur_y > term->scroll_bottom) {
+                printf("term_size scroll %d\n", cur_y);
+                _scroll_up(term, term->cur_y - term->scroll_bottom);
+                cur_y = term->scroll_bottom;
+            }
+        }
+
+        if (is_newline || x >= old_c) {
+            x = 0;
+            y++;
+        }
+
+        printf("term_resize is_newline %d\n", is_newline);
+        printf("term_resize %d, %d, %d, %d\n", y, x, cur_y, cur_x);
+
+        term->screen[cur_y].str[cur_x].ch = tmp[y].str[x].ch;
+        term->screen[cur_y].str[cur_x++].arg = tmp[y].str[x++].arg;
+    }
+
+    for (int i = 0; i < old_r; i++) {
+        free(tmp[i].str);
+    }
+    free(tmp);
+
+    pty_set_size(&term->pty, r, c);
+
+    pthread_mutex_unlock(&term->mutex);
+}
+
 term_t *get_term(int r, int c) {
     term_t *term = (term_t *)CHECK_PTR(malloc(sizeof(term_t)), "no memory for malloc a term_t");
+
+    pthread_mutex_init(&term->mutex, NULL);
+
+    open_pty(&term->pty);
+    pty_set_size(&term->pty, r, c);
+    spawn(&term->pty);
 
     term->r = r;
     term->c = c;
 
     term->cur_x = term->cur_y = 0;
     term->just_wraped = 0;
-    term->screen = (tchar_t **)CHECK_PTR(malloc(r * sizeof(char *)), "no memory for malloc screen");
+    term->screen = (tline_t *)CHECK_PTR(malloc(r * sizeof(tline_t)), "no memory for malloc screen");
 
     for (int j = 0; j < r; j++) {
-        *(term->screen + j) = (tchar_t *)CHECK_PTR(malloc((c + 1) * sizeof(tchar_t)), "no memory for malloc screen");
-        // memset(term->screen[i], '\0', (c + 1) * sizeof(tchar_t));
-        for (int i = 0; i < c; i++) {
-            term->screen[j][i].ch = '\0';
-            term->screen[j][i].arg = term->arg;
+        term->screen[j].is_wraped = 0;
+        term->screen[j].str = (tchar_t *)CHECK_PTR(malloc((c + 1) * sizeof(tchar_t)), "no memory for malloc screen");
+        for (int i = 0; i < c + 1; i++) {
+            term->screen[j].str[i].ch = '\0';
+            term->screen[j].str[i].arg = term->default_arg;
         }
-        term->screen[j][term->c].ch = '\0';
     }
 
     // log("term size: %ld", sizeof(term_t) + r * (c + 1) * sizeof(tchar_t));
@@ -63,8 +144,8 @@ term_t *get_term(int r, int c) {
 void clearline(term_t *term, int r) {
     // log("clearline %d\n", r);
     for (int i = 0; i < term->c; i++) {
-        term->screen[r][i].ch = ' ';
-        term->screen[r][i].arg = term->default_arg;
+        term->screen[r].str[i].ch = '\0';
+        term->screen[r].str[i].arg = term->default_arg;
     }
 }
 
@@ -74,16 +155,29 @@ void copy_lines(term_t *term, unsigned int dst, unsigned int src, unsigned int n
         src == dst    ||    n  <= 0) return;
 
     n = MIN(n, term->scroll_bottom - src + 1);
-    tchar_t screen_temp[n][term->c + 1];
+    tline_t *screen_temp = (tline_t *)CHECK_PTR(malloc(n * sizeof(tline_t)), "no memory for malloc screen");
+
+    for (int j = 0; j < term->r; j++) {
+        term->screen[j].is_wraped = 0;
+        screen_temp[j].str = (tchar_t *)CHECK_PTR(malloc((term->c + 1) * sizeof(tchar_t)), "no memory for malloc screen");
+        for (int i = 0; i < term->c + 1; i++) {
+            screen_temp[j].str[i].ch = '\0';
+            screen_temp[j].str[i].arg = term->default_arg;
+        }
+    }
 
     for (unsigned int i = 0; i < n; i++) {
-        memcpy(screen_temp[i], term->screen[src + i], sizeof(tchar_t) * (term->c + 1));
+        screen_temp[i].is_wraped = term->screen[src + i].is_wraped;
+        memcpy(screen_temp[i].str, term->screen[src + i].str, sizeof(tchar_t) * (term->c + 1));
     }
 
     n = MIN(n, term->scroll_bottom - dst + 1);
     for (unsigned int i = 0; i < n; i++) {
-        memcpy(term->screen[dst + i], screen_temp[i], sizeof(tchar_t) * (term->c + 1));
+        term->screen[dst + i].is_wraped = screen_temp[i].is_wraped;
+        memcpy(term->screen[dst + i].str, screen_temp[i].str, sizeof(tchar_t) * (term->c + 1));
     }
+
+    free(screen_temp);
 }
 
 void _scroll_up(term_t *term, unsigned int n) {
@@ -164,8 +258,8 @@ void cursor_control(term_t *term, char func) {
     int second = term->paser.pm[1] == 0? 1 : term->paser.pm[1];
 
     switch (func) {
-        CASE('A', term->cur_y = MIN(0,           term->cur_y - first););
-        CASE('B', term->cur_y = MAX(term->r - 1, term->cur_y + first););
+        CASE('A', term->cur_y = MAX(0,           term->cur_y - first););
+        CASE('B', term->cur_y = MIN(term->r - 1, term->cur_y + first););
         CASE('C', term->cur_x = MIN(term->c - 1, term->cur_x + first););
         CASE('D', term->cur_x = MAX(0,           term->cur_x - first););
         CASE('E', term->cur_y = MAX(0,           term->cur_y - first););
@@ -182,7 +276,7 @@ void erase_char(term_t *term) {
     tchar_t erase = {.ch = ' ', .arg = term->default_arg};
 
     for (int i = 0; i < n; i++) {
-        term->screen[term->cur_y][term->cur_x + i] = erase;
+        term->screen[term->cur_y].str[term->cur_x + i] = erase;
     }
 }
 
@@ -191,9 +285,9 @@ void _erase_line(term_t *term, int r, int c, int func) {
     tchar_t erase = {.ch = ' ', .arg = term->arg};
 
     switch (func) {
-        CASE(0, for(int i = c; i < term->c; i++) { term->screen[r][i] = erase;});
-        CASE(1, for(int i = 0; i < c;       i++) { term->screen[r][i] = erase;});
-        CASE(2, for(int i = 0; i < term->c; i++) { term->screen[r][i] = erase;});
+        CASE(0, for(int i = c; i < term->c; i++) { term->screen[r].str[i] = erase;});
+        CASE(1, for(int i = 0; i < c;       i++) { term->screen[r].str[i] = erase;});
+        CASE(2, for(int i = 0; i < term->c; i++) { term->screen[r].str[i] = erase;});
     }
 }
 
@@ -269,18 +363,18 @@ void delete_line(term_t *term) {
 void delete_char(term_t *term) {
     int n = term->paser.pm[0] <= 0? 1 : term->paser.pm[0];
     n = MIN(n, term->c - term->cur_x);
-    memmove(term->screen[term->cur_y] + term->cur_x,
-            term->screen[term->cur_y] + term->cur_x + n,
+    memmove(term->screen[term->cur_y].str + term->cur_x,
+            term->screen[term->cur_y].str + term->cur_x + n,
             term->c - term->cur_x - n);
     for (int i = 0; i < n; i++) {
-        term->screen[term->cur_y][term->c - i - 1].ch = '\0';
-        term->screen[term->cur_y][term->c - i - 1].arg = term->default_arg;
+        term->screen[term->cur_y].str[term->c - i - 1].ch = '\0';
+        term->screen[term->cur_y].str[term->c - i - 1].arg = term->default_arg;
     }
 }
 
 void scroll_up(term_t *term) {
     int n = term->paser.pm[0] <= 0? 1 : term->paser.pm[0];
-    tchar_t *screen_temp[term->r];
+    tline_t screen_temp[term->r];
 
     for (int i = 0; i < term->r; i++) screen_temp[i] = term->screen[i];
     for (int i = 0; i < term->r - n; i++ ) term->screen[i] = screen_temp[i + n];
@@ -292,7 +386,7 @@ void scroll_up(term_t *term) {
 
 void scroll_down(term_t *term) {
     int n = term->paser.pm[0] <= 0? 1 : term->paser.pm[0];
-    tchar_t *screen_temp[term->r];
+    tline_t screen_temp[term->r];
 
     for (int i = 0; i < term->r; i++) screen_temp[i] = term->screen[i];
     for (int i = 0; i < term->r - n; i++ ) term->screen[i + n] = screen_temp[i];
@@ -344,9 +438,10 @@ int handle_ansi(term_t *term, const char ch) {
 
     NORMAL_STATE(
         if (ch == ANSI_BELL       ) { return 1;                                                         }
-        if (ch == ANSI_BACKSPACE  ) { if (--term->cur_x < 0) { term->cur_y--; term->cur_x = term->c - 2;}
-                                      term->screen[term->cur_y][term->cur_x].ch = ' '; return 1;        }
-        if (ch == ANSI_NEWLINE    ) { if(!term->just_wraped) { term->cur_y++; term->just_wraped = 0;    } 
+        if (ch == ANSI_BACKSPACE  ) { if (--term->cur_x < 0) { term->cur_y--; term->cur_x = term->c - 1;}
+                                      term->screen[term->cur_y].str[term->cur_x].ch = ' '; return 1;    }
+        if (ch == ANSI_NEWLINE    ) { if(!term->just_wraped) { term->cur_y++; term->just_wraped = 0; } 
+                                      else            { term->screen[term->cur_y - 1].is_wraped = 0; }
                                       return 1;                                                         }
         if (ch == ANSI_RETURN     ) { term->cur_x = 0; return 1;                                        }
         if (ch == ANSI_ESCAPE     ) { term->paser.state = ESCAPE; return 1;                             }
@@ -405,8 +500,8 @@ void term_write_ch(term_t *term, const char ch) {
                 flag = 0;
             }
             term_log("term_write: %c\n", ch);
-            term->screen[term->cur_y][term->cur_x].ch = ch;
-            term->screen[term->cur_y][term->cur_x++].arg = term->arg;
+            term->screen[term->cur_y].str[term->cur_x].ch = ch;
+            term->screen[term->cur_y].str[term->cur_x++].arg = term->arg;
         }
         else {
             if (flag == 0) {
@@ -432,6 +527,7 @@ void term_write_ch(term_t *term, const char ch) {
 
         if (term->cur_x >= term->c) {
             term->cur_x = 0;
+            term->screen[term->cur_y].is_wraped = 1;
             term->cur_y++;
             term->just_wraped = 1;
         }
@@ -451,12 +547,14 @@ void term_write_ch(term_t *term, const char ch) {
 }
 
 int term_write(term_t *term, const char *str) {
+    pthread_mutex_lock(&term->mutex);
     int len = strlen(str);
     int y = term->cur_y;
 
     for (int i = 0; i < len; i++) {
         term_write_ch(term, *(str + i));
     }
+    pthread_mutex_unlock(&term->mutex);
 
     term->callback(REDRAW, NULL);
 
