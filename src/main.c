@@ -1,8 +1,9 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <string.h>
-#include <sys/select.h>
 #include <unistd.h>
+#define SDL_MAIN_HANDLED
+#include <SDL2/SDL_main.h>
 #include <SDL2/SDL_error.h>
 #include <SDL2/SDL_events.h>
 #include <SDL2/SDL_keyboard.h>
@@ -18,6 +19,26 @@
 #include "pty.h"
 #include "term.h"
 #include "util.h"
+
+#ifdef __linux__
+
+#include <sys/select.h>
+
+#elif defined(_WIN32)
+
+#include <winsock2.h>
+
+#elif defined(__APPLE__) && defined(__MACH__)
+// 针对 macOS 平台的代码
+#elif defined(__ANDROID__)
+// 针对 Android 平台的代码
+#elif defined(__unix__)
+// 针对 Unix 系统的代码
+#elif defined(_POSIX_VERSION)
+// 针对符合 POSIX 标准的系统
+#else
+#error "未知平台"
+#endif
 
 
 #define BUFFER_SIZE 4096
@@ -177,13 +198,15 @@ void draw_term(SDL_Renderer *renderer, term_t *term, font_t *font) {
 void *run_term(void *arg) {
     struct run_term_arg_t *run_term_arg = (struct run_term_arg_t *)CHECK_PTR(arg, "run_term get a NULL"); 
     term_t *term = (term_t *)CHECK_PTR(arg, "term thread get a NULL argument");
-    pty_t *pty = &term->pty;
-    int maxfd = pty->master;
+    pty_t pty = term->pty;
+
+#ifdef __linux__
+
+    int maxfd = PTY_READ_FD(pty);
     fd_set readable;
     FD_ZERO(&readable);
-    FD_SET(pty->master, &readable);
-    // struct timeval timeout = {.tv_sec = 0, .tv_usec = 0};
-    
+    FD_SET(PTY_READ_FD(pty), &readable);
+
     while (1) {
         int select_res = select(maxfd + 1, &readable, NULL, NULL, NULL);
         if (select_res == -1) {
@@ -191,8 +214,8 @@ void *run_term(void *arg) {
             break;
         }
 
-        if (FD_ISSET(pty->master, &readable) && select_res > 0) {
-            int len = read(pty->master, buffer, BUFFER_SIZE);
+        if (FD_ISSET(PTY_READ_FD(pty), &readable) && select_res > 0) {
+            int len = READ_PTY(term->pty, buffer, BUFFER_SIZE);
             if (len <= 0) {
                 fprintf(stderr, "Nothing to read from child: ");
                 perror(NULL);
@@ -207,6 +230,38 @@ void *run_term(void *arg) {
     }
 
     return arg;
+
+#elif defined(_WIN32)
+
+    while(1) {
+        DWORD avail = 0;
+        if (!PeekNamedPipe(PTY_READ_FD(pty), NULL, 0, NULL, &avail, NULL)) return arg;
+        if (avail > 0) {
+            int len = READ_PTY(term->pty, buffer, BUFFER_SIZE);
+            if (len <= 0) {
+                fprintf(stderr, "Nothing to read from child: ");
+                perror(NULL);
+                SDL_Event event = {.type = SDL_QUIT};
+                SDL_PushEvent(&event);
+                break;
+            }
+            buffer[len] = '\0';
+
+            term_write(term, buffer);
+        }
+    }
+
+#elif defined(__APPLE__) && defined(__MACH__)
+// 针对 macOS 平台的代码
+#elif defined(__ANDROID__)
+// 针对 Android 平台的代码
+#elif defined(__unix__)
+// 针对 Unix 系统的代码
+#elif defined(_POSIX_VERSION)
+// 针对符合 POSIX 标准的系统
+#else
+#error "未知平台"
+#endif
 }
 
 void *callback(int type, void *arg) {
@@ -251,17 +306,17 @@ void conbination_key(SDL_Keysym keysym, term_t *term) {
         if (keysym.sym > 90 && keysym.sym < 96)  str[0] = keysym.sym - 64;
         if (keysym.sym > 96 && keysym.sym < 123) str[0] = keysym.sym - 96;
         str[1] = '\0';
-        write(term->pty.master, str, 2);
+        WRITE_PTY(term->pty, str, 2);
     }
 }
 
-int main() {
+int main(int argc, char* argv[]) {
     init();
 
     font_t font = open_font("./font.ttf");
 
     SDL_Window *win = (SDL_Window *)CHECK_PTR(
-        SDL_CreateWindow("rterm", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, font.w * TERM_COL, font.h * TERM_ROW, SDL_WINDOW_RESIZABLE), // | SDL_WINDOW_BORDERLESS),
+        SDL_CreateWindow("rterm", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, font.w * TERM_COL, font.h * TERM_ROW, SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS),
         "Failed to create window: %s",
         SDL_GetError()
     );
@@ -287,7 +342,7 @@ int main() {
     SDL_StartTextInput();
     while (running) {
         SDL_WaitEvent(&event);
-        #define WRITE_MASTER(str, len) {write(term->pty.master, str, len);}
+        #define WRITE_MASTER(str, len) {WRITE_PTY(term->pty, str, len);}
         char str[2] = {'\0', '\0'};
         switch (event.type) {
             CASE(SDL_QUIT,      running = 0);
@@ -303,7 +358,7 @@ int main() {
                     default: conbination_key(event.key.keysym, term);break;
                 }
             );
-            CASE(SDL_TEXTINPUT, WRITE_MASTER(event.text.text, strlen(event.text.text)););
+            CASE(SDL_TEXTINPUT, printf("get text input %s\n", event.text.text); WRITE_MASTER(event.text.text, strlen(event.text.text)););
             CASE(SDL_REDRAW, draw_term(renderer, term, &font););
             CASE(SDL_WINDOWEVENT, window_handle(event.window, renderer, term, &font););
             CASE(SDL_SETTITLE, SDL_SetWindowTitle(win, (const char *)event.user.data1); free(event.user.data1));

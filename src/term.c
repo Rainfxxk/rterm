@@ -514,7 +514,10 @@ void term_write_ch(term_t *term, const char ch) {
                 idx = 0;
                 flag = 0;
             }
-            if (ch == '\x1b') idx = stpcpy(&control_seq[idx], "\\x1b") - &control_seq[idx];
+            if (ch == '\x1b') {
+                strcpy(&control_seq[idx], "\\x1b");
+                idx = strlen("\\x1b");
+            }
             else control_seq[idx++] = ch;
             if (idx >= 100) {
                 control_seq[99] = '\0';
