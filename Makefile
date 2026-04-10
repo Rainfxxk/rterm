@@ -2,6 +2,12 @@ CC		:= gcc
 CFLAGS 	:= -Wall -Wextra -g
 LFLAGS	:= -lSDL2 -lSDL2_ttf
 
+ifeq ($(OS),Windows_NT)
+    # Windows (MinGW)
+	CFLAGS = -mconsole -Wall -Wextra -g
+    LFLAGS += -lws2_32 -luser32 -lSDL2main
+endif
+
 SRC_DIR := ./src
 TARGET  := ./build/rterm
 TARGET_DIR  := ./build/rterm
@@ -22,7 +28,8 @@ $(OBJS):%.o:%.c
 -include $(OBJS_D)
 
 $(TARGET): $(OBJS)
-	$(CC) $^ -o $@ $(LFLAGS)
+	echo  $(LFLAGS)
+	$(CC) $(CFLAGS) $^ -o $@ $(LFLAGS)
 
 gdb: $(TARGET)
 	gdb $(TARGET)
